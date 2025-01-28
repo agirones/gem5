@@ -423,7 +423,7 @@ class IEW
     {
         static std::string statusStrings[ThreadStatusMax];
 
-        IEWStats(CPU *cpu);
+        IEWStats(CPU *cpu, const BaseO3CPUParams &params);
 
         /** Stat for total number of cycles spent in each IEW state */
         statistics::Vector dispatchStatus;
@@ -475,6 +475,39 @@ class IEW
         statistics::Formula wbRate;
         /** Average number of woken instructions per writeback. */
         statistics::Formula wbFanout;
+        /** Histogram of the number of instructions each instruction wakes up. */
+        statistics::Distribution wakeupInstructionsHistogram;
+        /** Histogram of the number of produced values by exec each cycle. */
+        statistics::Distribution producerInstPerCycle;
+        /** Histogram of instructions waking up 1 or more instructions per cycle. */
+        statistics::Distribution instWakeupOneOrMorePerCycle;
+        /** Histogram of instructions waking up 2 or more instructions per cycle. */
+        statistics::Distribution instWakeupTwoOrMorePerCycle;
+        /** Histogram of instructions waking up 3 or more instructions per cycle. */
+        statistics::Distribution instWakeupThreeOrMorePerCycle;
+        /** Histogram of instruction types for instructions that did not wake up any instructions in the instruction queue. */
+        statistics::Vector noWakeupInstType;
+        /** Stat for total number of instructions that don't wake up any instruction. */
+        statistics::Scalar noWakeupInst;
+        /** Stat for total number of store instructions that don't wake up any instruction. */
+        statistics::Scalar noWakeupStoreInst;
+        /** Stat for total number of load instructions that don't wake up any instruction. */
+        statistics::Scalar noWakeupLoadInst;
+        /** Stat for total number of control instructions that don't wake up any instruction. */
+        statistics::Scalar noWakeupControlInst;
+        /** Stat for total number of call instructions that don't wake up any instruction. */
+        statistics::Scalar noWakeupCallInst;
+        /** Stat for total number of return instructions that don't wake up any instruction. */
+        statistics::Scalar noWakeupReturnInst;
+        /** Stat for total number of direct control instructions that don't wake up any instruction. */
+        statistics::Scalar noWakeupDirectCtrlInst;
+        /** Stat for total number of indirect control instructions that don't wake up any instruction. */
+        statistics::Scalar noWakeupIndirectCtrlInst;
+        /** Stat for total number of conditional control instructions that don't wake up any instruction. */
+        statistics::Scalar noWakeupCondCtrlInst;
+        /** Stat for total number of unconditional control instructions that don't wake up any instruction. */
+        statistics::Scalar noWakeupUncondCtrlInst;
+
     } iewStats;
 };
 
