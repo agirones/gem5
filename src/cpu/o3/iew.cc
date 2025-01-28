@@ -56,7 +56,9 @@
 #include "debug/Drain.hh"
 #include "debug/IEW.hh"
 #include "debug/O3PipeView.hh"
+#include "debug/WakeUp.hh"
 #include "params/BaseO3CPU.hh"
+#include "enums/OpClass.hh"
 
 namespace gem5
 {
@@ -188,7 +190,39 @@ IEW::IEWStats::IEWStats(CPU *cpu)
              "Insts written-back per cycle"),
     ADD_STAT(wbFanout, statistics::units::Rate<
                 statistics::units::Count, statistics::units::Count>::get(),
-             "Average fanout of values written-back")
+             "Average fanout of values written-back"),
+    ADD_STAT(wakeupInstructionsHistogram, statistics::units::Count::get(),
+             "Histogram of the number of instructions each instruction wakes up"),
+    ADD_STAT(producerInstPerCycle, statistics::units::Count::get(),
+             "Histogram of instructions with destination operand per cycle"),
+    ADD_STAT(instWakeupOneOrMorePerCycle, statistics::units::Count::get(),
+             "Histogram of instructions waking up 1 or more instructions per cycle"),
+    ADD_STAT(instWakeupTwoOrMorePerCycle, statistics::units::Count::get(),
+             "Histogram of instructions waking up 2 or more instructions per cycle"),
+    ADD_STAT(instWakeupThreeOrMorePerCycle, statistics::units::Count::get(),
+             "Histogram of instructions waking up 3 or more instructions per cycle"),
+    ADD_STAT(noWakeupInstType, statistics::units::Count::get(),
+             "Instruction types for instructions that did not wake up any instructions in the instruction queue"),
+    ADD_STAT(noWakeupInst, statistics::units::Count::get(),
+             "Stat for total number of instructions that don't wake up any instruction"),
+    ADD_STAT(noWakeupStoreInst, statistics::units::Count::get(),
+             "Stat for total number of store instructions that don't wake up any instruction"),
+    ADD_STAT(noWakeupLoadInst, statistics::units::Count::get(),
+             "Stat for total number of load instructions that don't wake up any instruction"),
+    ADD_STAT(noWakeupControlInst, statistics::units::Count::get(),
+             "Stat for total number of control instructions that don't wake up any instruction"),
+    ADD_STAT(noWakeupCallInst, statistics::units::Count::get(),
+             "Stat for total number of call instructions that don't wake up any instruction"),
+    ADD_STAT(noWakeupReturnInst, statistics::units::Count::get(),
+             "Stat for total number of return instructions that don't wake up any instruction"),
+    ADD_STAT(noWakeupDirectCtrlInst, statistics::units::Count::get(),
+             "Stat for total number of direct control instructions that don't wake up any instruction"),
+    ADD_STAT(noWakeupIndirectCtrlInst, statistics::units::Count::get(),
+             "Stat for total number of indirect control instructions that don't wake up any instruction"),
+    ADD_STAT(noWakeupCondCtrlInst, statistics::units::Count::get(),
+             "Stat for total number of conditional control instructions that don't wake up any instruction"),
+    ADD_STAT(noWakeupUncondCtrlInst, statistics::units::Count::get(),
+             "Stat for total number of unconditional control instructions that don't wake up any instruction")
 {
     instsToCommit
         .init(cpu->numThreads)
@@ -213,6 +247,33 @@ IEW::IEWStats::IEWStats(CPU *cpu)
     wbFanout
         .flags(statistics::total);
     wbFanout = producerInst / consumerInst;
+
+    wakeupInstructionsHistogram
+        .init(0,64,1)
+        .flags(statistics::pdf);
+
+    producerInstPerCycle
+        .init(0,8,1)
+        .flags(statistics::pdf);
+
+    instWakeupOneOrMorePerCycle
+        .init(0,8,1)
+        .flags(statistics::pdf);
+
+    instWakeupTwoOrMorePerCycle
+        .init(0,8,1)
+        .flags(statistics::pdf);
+
+    instWakeupThreeOrMorePerCycle
+        .init(0,8,1)
+        .flags(statistics::pdf);
+
+    noWakeupInstType
+        .init(Num_OpClasses)
+        .flags(statistics::pdf | statistics::dist);
+    for (int i=0; i < Num_OpClasses; ++i) {
+        noWakeupInstType.subname(i, enums::OpClassStrings[i]);
+    }
 }
 
 IEW::IEWStats::ExecutedInstStats::ExecutedInstStats(CPU *cpu)
@@ -1347,6 +1408,11 @@ IEW::writebackInsts()
     // mark scoreboard that this instruction is finally complete.
     // Either have IEW have direct access to scoreboard, or have this
     // as part of backwards communication.
+    int nProd = 0;
+    int oneOrMoreCount = 0;
+    int twoOrMoreCount = 0;
+    int threeOrMoreCount = 0;
+
     for (int inst_num = 0; inst_num < wbWidth &&
              toCommit->insts[inst_num]; inst_num++) {
         DynInstPtr inst = toCommit->insts[inst_num];
@@ -1380,13 +1446,52 @@ IEW::writebackInsts()
                 }
             }
 
+            if(inst->numDestRegs()){
+                nProd++;
+            }
+
             if (dependents) {
                 iewStats.producerInst[tid]++;
                 iewStats.consumerInst[tid]+= dependents;
+                oneOrMoreCount++;
+                twoOrMoreCount += (dependents > 1) ? 1 : 0;
+                threeOrMoreCount += (dependents > 2) ? 1 : 0;
+                if (dependents > 15) {
+                    DPRINTF(WakeUp,"Waking up %d instructions due to instruction type: '%s'.\n",
+                            dependents,
+                            gem5::enums::OpClassStrings[inst->opClass()]);
+                }
+            } else {
+                iewStats.noWakeupInstType[inst->opClass()]++;
+                iewStats.noWakeupInst++;
+                if(inst->isLoad()){
+                    iewStats.noWakeupLoadInst++;
+                }
+                if(inst->isStore())
+                    iewStats.noWakeupStoreInst++;
+                if(inst->isControl())
+                    iewStats.noWakeupControlInst++;
+                if(inst->isCall())
+                    iewStats.noWakeupCallInst++;
+                if(inst->isReturn())
+                    iewStats.noWakeupReturnInst++;
+                if(inst->isDirectCtrl())
+                    iewStats.noWakeupDirectCtrlInst++;
+                if(inst->isIndirectCtrl())
+                    iewStats.noWakeupIndirectCtrlInst++;
+                if(inst->isCondCtrl())
+                    iewStats.noWakeupCondCtrlInst++;
+                if(inst->isUncondCtrl())
+                    iewStats.noWakeupUncondCtrlInst++;
             }
             iewStats.writebackCount[tid]++;
+            iewStats.wakeupInstructionsHistogram.sample(dependents);
         }
     }
+    iewStats.producerInstPerCycle.sample(nProd);
+    iewStats.instWakeupOneOrMorePerCycle.sample(oneOrMoreCount);
+    iewStats.instWakeupTwoOrMorePerCycle.sample(twoOrMoreCount);
+    iewStats.instWakeupThreeOrMorePerCycle.sample(threeOrMoreCount);
 }
 
 void
