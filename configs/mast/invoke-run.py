@@ -39,7 +39,7 @@ def cleanup():
 setup_run_dir()
 
 subprocess.run([f"{root}/build/X86/gem5.opt",
-                f"{root}/configs/mast/profile-config.py",
+                f"{root}/configs/mast/profile-config-legacy.py",
                 "--benchmark-num", str(args.benchmark_num)])
 
 cleanup()
