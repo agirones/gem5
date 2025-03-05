@@ -1,6 +1,5 @@
 import argparse
 import m5
-import os
 
 from gem5.components.boards.x86_board import X86Board
 from gem5.components.cachehierarchies.ruby.mesi_two_level_cache_hierarchy import MESITwoLevelCacheHierarchy
@@ -12,7 +11,6 @@ from gem5.utils.requires import requires
 from gem5.simulate.exit_event import ExitEvent
 from gem5.simulate.simulator import Simulator
 from gem5.resources.resource import (
-    CheckpointResource,
     DiskImageResource,
     obtain_resource
 )
@@ -33,11 +31,6 @@ parser.add_argument(
 args = parser.parse_args()
 
 benchmark = ALL_BENCHMARKS[args.benchmark_num]
-
-script_dir = os.path.dirname(__file__)
-root = os.path.abspath(f"{script_dir}/../..")
-print(root)
-checkpoints = f"{root}/runs/checkpoints"
 
 # Run a check to ensure the right version of gem5 is being used.
 requires(isa_required=ISA.X86)
@@ -79,6 +72,7 @@ board = X86Board(
 
 command = "m5 checkpoint;"\
           "echo 'we have checkpointed';"\
+          "m5 exit;"\
           f"cd /home/gem5/x86-static-17/{benchmark.name};"\
           f"./{benchmark.binary} {' '.join(benchmark.args[0])};"\
           "m5 exit;"
@@ -94,12 +88,11 @@ board.set_kernel_disk_workload(
             "root=/dev/sda2",
             "no_systemd=true"
         ],
-    checkpoint=CheckpointResource(local_path=f"{checkpoints}/{benchmark.name}-cpt"),
     #use readfile to specify a file for this, do programatically for spec17
     readfile_contents=command
 )
 
-board.processor.cores[0].core.addSimPointProbe(50000000)
+#board.processor.cores[0].core.addSimPointProbe(100000)
 
 def exit_event_handler():
     print("Exit Event: Kernel Booted")
@@ -116,7 +109,7 @@ sim = Simulator(board=board,
                     ExitEvent.EXIT: exit_event_handler()
 })
 
-sim.schedule_max_insts(100000000000)
+
 sim.run()
 
 print(
