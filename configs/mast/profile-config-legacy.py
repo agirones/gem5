@@ -48,6 +48,7 @@ script_dir = os.path.dirname(__file__)
 root = os.path.abspath(f"{script_dir}/../..")
 print(root)
 checkpoints = f"{root}/runs/legacy-checkpoints"
+simpoints_dir = f"/cluster/projects/mast/simpoints/simpoints"
 
 disk_image = "/cluster/home/amundbk/mast/full_system/x86-ubuntu"
 root_device = "/dev/sda2"
@@ -117,6 +118,33 @@ def config_cache(system):
 
     return system
 
+def parseSimpoints(benchmark, interval_length, warmup_length, testsys):
+    simpoints = []
+    simpoint_start_insts = []
+    with open(f"{simpoints_dir}/{benchmark.name}.simpoints", "r") as simpoints_file,\
+         open(f"{simpoints_dir}/{benchmark.name}.weights", "r") as weights_file:
+        sim_lines = simpoints_file.readlines()
+        weight_lines = weights_file.readlines()
+        assert len(sim_lines) == len(weight_lines), f"different sim ({len(sim_lines)} and weight ({len(weight_lines)}))"
+
+        for i in range(len(sim_lines)):
+            interval = int(sim_lines[i].split()[0])
+            weight = float(weight_lines[i].split()[0])
+            if (interval * interval_length - warmup_length > 0):
+                starting_inst_count = interval * interval_length - warmup_length
+                actual_warmup_length = warmup_length
+            else: 
+                starting_inst_count = 0
+                actual_warmup_length = interval * interval_length
+
+            simpoints.append(
+                (interval, weight, starting_inst_count, actual_warmup_length)
+            )
+            simpoint_start_insts.append(starting_inst_count)
+    testsys.cpu[0].simpoint_start_insts = simpoint_start_insts
+    return simpoints
+
+
 bm = [SysConfig(
     disks = [disk_image],
     rootdev = root_device,
@@ -126,9 +154,7 @@ bm = [SysConfig(
 
 #(TestCPUClass, test_mem_mode, FutureClass) = Simulation.setCPUClass(args)
 
-(TestCPUClass, test_mem_mode) = Simulation.getCPUClass("X86NonCachingSimpleCPU")
-#test_mem_mode = "atomic"
-FutureClass = TestCPUClass
+(TestCPUClass, test_mem_mode) = Simulation.getCPUClass("X86AtomicSimpleCPU")
 
 
 num_cpus = 1
@@ -194,12 +220,6 @@ test_sys.cpu = [
 ]
 bpClass = ObjectList.bp_list.get("MultiperspectivePerceptronTAGE64KB")
 test_sys.cpu[0].branchPred = bpClass()
-IndirectBPClass = ObjectList.indirect_bp_list.get(
-    "SimpleIndirectPredictor"
-)
-test_sys.cpu[0].branchPred.indirectBranchPred = (
-    IndirectBPClass()
-)
 
 # TODO: find out why Ruby is like this
 if ruby:
@@ -236,17 +256,17 @@ else:
     config_cache(test_sys)
     MemConfig.config_mem(args, test_sys)
 
-root = Root(full_system=True, system=test_sys)
-
 # Everything before was getting the system ready
 # We now configure the run
 # These are the three run-modes
 checkpoint_post_kernel = False
-simpoint_profile = True
-simpoint_checkpoint = False
+simpoint_profile = False
+simpoint_checkpoint = True
+simpoint_run = False
 
 # These are control variables
 simpoint_interval = 50000000
+warmup_length     = 10000000
 post_boot = False
 
 
@@ -262,18 +282,31 @@ elif (simpoint_checkpoint):
     post_boot = True
     cpt_dir = f"{checkpoints}/{benchmark.name}-cpt"
     simpoint_interval = 50000000
+elif (simpoint_run):
+    post_boot = True
+    cpt_dir = f"{checkpoints}/{benchmark.name}-cpt"
+    simpoint_interval = 50000000
 
-m5.instantiate(cpt_dir)
-checkpoint_dir = f"{checkpoints}"
+simpoints = []
+if (simpoint_checkpoint or simpoint_run):
+    simpoints = parseSimpoints(benchmark, simpoint_interval,
+                               warmup_length, test_sys)
+    print("Prepped simpoints for running")
+
+
 
 #if os.path.exists(checkpoint_dir):
 #    shutil.rmtree(checkpoint_dir)
 
 #os.mkdir(checkpoint_dir)
-
 maxinsts = 100000000000
 
 test_sys.cpu[0].max_insts_any_thread = maxinsts
+
+root = Root(full_system=True, system=test_sys)
+
+m5.instantiate(cpt_dir)
+checkpoint_dir = f"{checkpoints}"
 
 stat_root_simobjs = []
 stats_root = []
@@ -291,10 +324,10 @@ m5.stats.global_dump_roots = stat_root_simobjs
 #    )
 
 print("**** REAL SIMULATION ****")
-exit_event = m5.simulate()
-print(f"Exit event encountered, cause = {exit_event.getCause()}")
 
 if (not post_boot):
+    exit_event = m5.simulate()
+    print(f"Exit event encountered, cause = {exit_event.getCause()}")
     if (exit_event.getCause() == "m5_exit instruction encountered"):
         print("Kernel booted most likely, we go back in")
         exit_event = m5.simulate()
@@ -304,7 +337,43 @@ if (not post_boot):
             "Should be running runscript now")
         m5.stats.reset()
         exit_event = m5.simulate()
-print(f"Exit event encountered, cause = {exit_event.getCause()}")
-if (exit_event.getCause() == "checkpoint"):
-    assert(checkpoint_post_kernel)
-    m5.checkpoint(joinpath(m5.options.outdir, f"{benchmark.name}-cpt"))
+
+if (checkpoint_post_kernel):
+    exit_event = m5.simulate()
+    print(f"Exit event encountered, cause = {exit_event.getCause()}")
+    if (exit_event.getCause() == "checkpoint"):
+        assert checkpoint_post_kernel, "checkpoint event encountered, but not in that mode"
+        m5.checkpoint(joinpath(m5.options.outdir, f"{benchmark.name}-cpt"))
+elif (simpoint_profile):
+    exit_event = m5.simulate()
+    print(f"Exit event encountered, cause = {exit_event.getCause()}")
+elif (simpoint_checkpoint):
+    num_checkpoints = 0
+    index = 0
+    last_cpt = -1 
+    for simpoint in simpoints:
+        interval, weight, starting_inst_count, warmup_length = simpoint
+        print(f"Running to checkpoint {index} with start {starting_inst_count} as first inst")
+        
+        if (starting_inst_count == last_cpt):
+            print("simpoints right next to each other, exiting")
+            exit(1)
+        
+        exit_event = m5.simulate()
+        print(f"Exit event encountered, cause = {exit_event.getCause()}")
+        
+        assert exit_event.getCause() == "simpoint starting point found", "Exit cause should only be due to meeting a simpoint"
+        m5.checkpoint(
+            f"{cpt_dir}/cpt.simpoint_{index}_inst_{starting_inst_count}_weight_{weight}_interval_{simpoint_interval}_warmup_{warmup_length}"
+        )
+        print(
+            f"Checkpoint #{index} written, start-inst: {starting_inst_count}, weight: {weight}"
+        )
+        last_cpt = starting_inst_count
+        num_checkpoints += 1
+        index += 1
+    print(f"Exiting @ tick {m5.curTick()} because {exit_event}")
+    print(f"{num_checkpoints} checkpoints taken")
+elif (simpoint_run):
+    print("Not yet implemented")
+    exit(1)

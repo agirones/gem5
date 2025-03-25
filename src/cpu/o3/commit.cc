@@ -61,6 +61,7 @@
 #include "debug/CommitRate.hh"
 #include "debug/Drain.hh"
 #include "debug/ExecFaulting.hh"
+#include "debug/Heartbeat.hh"
 #include "debug/HtmCpu.hh"
 #include "params/BaseO3CPU.hh"
 #include "sim/faults.hh"
@@ -1105,6 +1106,11 @@ Commit::commitInsts()
     if (num_committed == commitWidth) {
         stats.commitEligibleSamples++;
     }
+
+    if (((numCommittedInsts % 1000000) > ((numCommittedInsts + num_committed) % 1000000))) {
+        DPRINTF(Heartbeat, "Committed instruction number %llu\n", (1 + (numCommittedInsts / 1000000)) * 1000000);
+    }
+    numCommittedInsts += num_committed;
 }
 
 bool

@@ -60,7 +60,7 @@ cache_hierarchy = MESITwoLevelCacheHierarchy(
 
 
 # Setup the system memory.
-memory = DIMM_DDR5_4400(size="12GiB")
+memory = DIMM_DDR5_4400(size="3GiB")
 
 # Setup a single core Processor.
 processor = SimpleProcessor(
@@ -86,7 +86,7 @@ command = "m5 checkpoint;"\
 
 board.set_kernel_disk_workload(
     kernel=obtain_resource(resource_id="x86-linux-kernel-5.4.0-105-generic"),
-    disk_image=DiskImageResource("/cluster/home/amundbk/MAST/full_system/x86-ubuntu"),
+    disk_image=DiskImageResource("/cluster/home/amundbk/mast/full_system/x86-ubuntu"),
     kernel_args=[
             "earlyprintk=ttyS0",
             "console=ttyS0",
@@ -100,6 +100,11 @@ board.set_kernel_disk_workload(
 )
 
 board.processor.cores[0].core.addSimPointProbe(50000000)
+
+print(board.get_cache_hierarchy())
+print(board.get_cache_hierarchy().prefetcher)
+exit(1)
+
 
 def exit_event_handler():
     print("Exit Event: Kernel Booted")
