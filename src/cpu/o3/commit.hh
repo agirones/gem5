@@ -454,6 +454,9 @@ class Commit
         a possible livelock senario.  */
     bool avoidQuiesceLiveLock;
 
+
+    ulong numCommittedInsts = 0;
+
     /** Updates commit stats based on this instruction. */
     void updateComInstStats(const DynInstPtr &inst);
 
@@ -491,6 +494,7 @@ class Commit
         /** Number of cycles where the commit bandwidth limit is reached. */
         statistics::Scalar commitEligibleSamples;
     } stats;
+
 };
 
 } // namespace o3

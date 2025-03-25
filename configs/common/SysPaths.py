@@ -51,7 +51,6 @@ class PathSearchFunc:
                     paths = os.environ[self.environment_variable].split(":")
                 except KeyError:
                     paths = ["/dist/m5/system", "/n/poolfs/z/dist/m5/system"]
-
                 # expand '~' and '~user' in paths
                 paths = list(map(os.path.expanduser, paths))
 
