@@ -80,7 +80,7 @@ command = "m5 checkpoint;"\
 
 board.set_kernel_disk_workload(
     kernel=obtain_resource(resource_id="x86-linux-kernel-5.4.0-105-generic"),
-    disk_image=DiskImageResource("/cluster/home/amundbk/mast/full_system/x86-ubuntu"),
+    disk_image=DiskImageResource("/cluster/projects/mast/full-system/disk-images/x86-ubuntu-with-spec17"),
     kernel_args=[
             "earlyprintk=ttyS0",
             "console=ttyS0",
