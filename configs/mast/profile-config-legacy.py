@@ -326,7 +326,9 @@ elif (simpoint_run):
     warmup_length = cpts[0].split("_")[-1]
     simpoint_interval = cpts[0].split("_")[-3]
 
-    sim_start_insts = [warmup_length, warmup_length+simpoint_interval]
+    sim_start_insts = []
+    sim_start_insts.append(warmup_length)
+    sim_start_insts.append(str(int(warmup_length)+int(simpoint_interval)))
     test_sys.cpu[0].simpoint_start_insts = sim_start_insts
 
 
@@ -386,9 +388,11 @@ if (checkpoint_post_kernel):
     if (exit_event.getCause() == "checkpoint"):
         assert checkpoint_post_kernel, "checkpoint event encountered, but not in that mode"
         m5.checkpoint(joinpath(m5.options.outdir, f"{benchmark.name}-cpt"))
+
 elif (simpoint_profile):
     exit_event = m5.simulate()
     print(f"Exit event encountered, cause = {exit_event.getCause()}")
+
 elif (simpoint_checkpoint):
     num_checkpoints = 0
     index = 0
@@ -403,19 +407,22 @@ elif (simpoint_checkpoint):
         
         exit_event = m5.simulate()
         print(f"Exit event encountered, cause = {exit_event.getCause()}")
-        
         assert exit_event.getCause() == "simpoint starting point found", "Exit cause should only be due to meeting a simpoint"
+
         m5.checkpoint(
             f"{cpt_dir}/cpt.simpoint_{index}_inst_{starting_inst_count}_weight_{weight}_interval_{simpoint_interval}_warmup_{warmup_length}"
         )
         print(
             f"Checkpoint #{index} written, start-inst: {starting_inst_count}, weight: {weight}"
         )
+
         last_cpt = starting_inst_count
         num_checkpoints += 1
         index += 1
+
     print(f"Exiting @ tick {m5.curTick()} because {exit_event}")
     print(f"{num_checkpoints} checkpoints taken")
+
 elif (simpoint_run):
     exit_event = m5.simulate()
     assert(exit_event.getCause() == "simpoint starting point found")
