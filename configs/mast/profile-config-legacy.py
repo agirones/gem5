@@ -39,6 +39,21 @@ parser.add_argument(
     help="which benchmark from spec17 speed suite to run"
 )
 
+parser.add_argument(
+    "--mode",
+    type=str,
+    action="store",
+    required=True,
+    help="which mode to run, valid options are cpt, profile, simtake, simrun"
+)
+
+parser.add_argument(
+    "--simpoint-num",
+    type=int,
+    required=False,
+    help="Which simpoint to run. Required if simrun mode",
+)
+
 args = parser.parse_args()
 
 
@@ -49,8 +64,9 @@ root = os.path.abspath(f"{script_dir}/../..")
 print(root)
 checkpoints = f"{root}/runs/legacy-checkpoints"
 simpoints_dir = f"/cluster/projects/mast/simpoints/simpoints"
+simpoint_cpt_dir = "/cluster/projects/mast/checkpoints/simpoint-checkpoints"
 
-disk_image = "/cluster/home/amundbk/mast/full_system/x86-ubuntu"
+disk_image = "/cluster/projects/mast/full-system/disk-images/x86-ubuntu-with-spec17"
 root_device = "/dev/sda2"
 mem_size = "16GiB"
 os_type = "linux"
@@ -63,7 +79,7 @@ kernel_cmd = " ".join([
     "no_systemd=true"
 ])
 
-kernel = "/cluster/home/amundbk/.cache/gem5/x86-linux-kernel-5.4.0-105-generic"
+kernel = "/cluster/projects/mast/full-system/kernels/x86-linux-kernel-5.4.0-105-generic"
 
 
 #test_sys.init_param = args.init_param
@@ -145,6 +161,12 @@ def parseSimpoints(benchmark, interval_length, warmup_length, testsys):
     return simpoints
 
 
+def get_sim_work_dir():
+    run_dir = f"{root}/runs/{benchmark.name}"
+    dirs = [x for x in os.listdir(run_dir) if x.startswith(f"cpt.simpoint_{args.simpoint_num}")]
+    assert(len(dirs) == 1)
+    return dirs[0]
+
 bm = [SysConfig(
     disks = [disk_image],
     rootdev = root_device,
@@ -204,7 +226,10 @@ test_sys.cpu_clk_domain = SrcClockDomain(
 )
 
 test_sys.workload.object_file = binary(kernel)
-work_dir = f"{root}/runs/{benchmark.name}"
+if not args.mode == "simrun":
+    work_dir = f"{root}/runs/{benchmark.name}"
+else:
+    work_dir = f"{root}/runs/{benchmark.name}/{get_sim_work_dir()}"
 
 
 with open(f"{work_dir}/readfile.script", "w") as file:
@@ -258,17 +283,28 @@ else:
 
 # Everything before was getting the system ready
 # We now configure the run
-# These are the three run-modes
+# These are the four run-modes
 checkpoint_post_kernel = False
 simpoint_profile = False
-simpoint_checkpoint = True
+simpoint_checkpoint = False
 simpoint_run = False
+
+if (args.mode == "cpt"):
+    checkpoint_post_kernel = True
+elif (args.mode == "profile"):
+    simpoint_profile = True
+elif (args.mode == "simtake"):
+    simpoint_checkpoint = True
+elif (args.mode == "simrun"):
+    simpoint_run = True
+else:
+    print("Invalid operation mode selected, valid options are cpt, profile, simtake, simrun")
+    exit(1)
 
 # These are control variables
 simpoint_interval = 50000000
 warmup_length     = 10000000
 post_boot = False
-
 
 if (checkpoint_post_kernel):
     post_boot = False
@@ -284,15 +320,21 @@ elif (simpoint_checkpoint):
     simpoint_interval = 50000000
 elif (simpoint_run):
     post_boot = True
-    cpt_dir = f"{checkpoints}/{benchmark.name}-cpt"
-    simpoint_interval = 50000000
+    cpts = [x for x in os.listdir(f"{simpoint_cpt_dir}/{benchmark.name}-cpt") if x.startswith(f"cpt.simpoint_{args.simpoint_num}")]
+    assert(len(cpts) == 1)
+    cpt_dir = f"{simpoint_cpt_dir}/{benchmark.name}-cpt/{cpts[0]}"
+    warmup_length = cpts[0].split("_")[-1]
+    simpoint_interval = cpts[0].split("_")[-3]
+
+    sim_start_insts = [warmup_length, warmup_length+simpoint_interval]
+    test_sys.cpu[0].simpoint_start_insts = sim_start_insts
+
 
 simpoints = []
-if (simpoint_checkpoint or simpoint_run):
+if (simpoint_checkpoint):
     simpoints = parseSimpoints(benchmark, simpoint_interval,
                                warmup_length, test_sys)
     print("Prepped simpoints for running")
-
 
 
 #if os.path.exists(checkpoint_dir):
@@ -375,5 +417,13 @@ elif (simpoint_checkpoint):
     print(f"Exiting @ tick {m5.curTick()} because {exit_event}")
     print(f"{num_checkpoints} checkpoints taken")
 elif (simpoint_run):
-    print("Not yet implemented")
-    exit(1)
+    exit_event = m5.simulate()
+    assert(exit_event.getCause() == "simpoint starting point found")
+    print("Warmed up! Dumping and resetting stats!")
+    m5.stats.dump()
+    m5.stats.reset()
+    exit_event = m5.simulate()
+    if (exit_event.getCause() == "simpoint starting point found"):
+        print("Done running SimPoint!")
+        sys.exit(exit_event.getCode())
+    print(f"Abnormal exit event encountered, cause = {exit_event.getCause()}")
