@@ -73,9 +73,9 @@ class BaseO3CPU(BaseCPU):
     activity = Param.Unsigned(0, "Initial count")
 
     cacheStorePorts = Param.Unsigned(
-        200, "Cache Ports. Constrains stores only."
+        1, "Cache Ports. Constrains stores only."
     )
-    cacheLoadPorts = Param.Unsigned(200, "Cache Ports. Constrains loads only.")
+    cacheLoadPorts = Param.Unsigned(2, "Cache Ports. Constrains loads only.")
 
     # Backward pipeline delays
     fetchToBacDelay = Param.Cycles(1, "Fetch to Branch address calc. delay")
@@ -83,7 +83,7 @@ class BaseO3CPU(BaseCPU):
     renameToFetchDelay = Param.Cycles(1, "Rename to fetch delay")
     iewToFetchDelay = Param.Cycles(1, "Issue/Execute/Writeback to fetch delay")
     commitToFetchDelay = Param.Cycles(1, "Commit to fetch delay")
-    fetchWidth = Param.Unsigned(8, "Fetch width")
+    fetchWidth = Param.Unsigned(5, "Fetch width")
     fetchBufferSize = Param.Unsigned(64, "Fetch buffer size in bytes")
     fetchQueueSize = Param.Unsigned(
         32, "Fetch queue size in micro-ops per-thread"
@@ -98,20 +98,20 @@ class BaseO3CPU(BaseCPU):
     # Forward pipeline delays
     bacToFetchDelay = Param.Cycles(1, "Branch address calc. to fetch delay")
     fetchToDecodeDelay = Param.Cycles(1, "Fetch to decode delay")
-    decodeWidth = Param.Unsigned(8, "Decode width")
+    decodeWidth = Param.Unsigned(5, "Decode width")
 
     iewToRenameDelay = Param.Cycles(
         1, "Issue/Execute/Writeback to rename delay"
     )
     commitToRenameDelay = Param.Cycles(1, "Commit to rename delay")
     decodeToRenameDelay = Param.Cycles(1, "Decode to rename delay")
-    renameWidth = Param.Unsigned(8, "Rename width")
+    renameWidth = Param.Unsigned(5, "Rename width")
 
     commitToIEWDelay = Param.Cycles(
         1, "Commit to Issue/Execute/Writeback delay"
     )
     renameToIEWDelay = Param.Cycles(
-        2, "Rename to Issue/Execute/Writeback delay"
+        1, "Rename to Issue/Execute/Writeback delay"
     )
     issueToExecuteDelay = Param.Cycles(
         1, "Issue to execute delay (internal to the IEW stage)"
@@ -139,8 +139,8 @@ class BaseO3CPU(BaseCPU):
         5, "Time buffer size for forward communication"
     )
 
-    LQEntries = Param.Unsigned(32, "Number of load queue entries")
-    SQEntries = Param.Unsigned(32, "Number of store queue entries")
+    LQEntries = Param.Unsigned(128, "Number of load queue entries")
+    SQEntries = Param.Unsigned(72, "Number of store queue entries")
     LSQDepCheckShift = Param.Unsigned(
         4, "Number of places to shift addr before check"
     )
@@ -172,12 +172,12 @@ class BaseO3CPU(BaseCPU):
     numRobs = Param.Unsigned(1, "Number of Reorder Buffers")
 
     numPhysIntRegs = Param.Unsigned(
-        256, "Number of physical integer registers"
+        280, "Number of physical integer registers"
     )
     numPhysFloatRegs = Param.Unsigned(
-        256, "Number of physical floating point registers"
+        224, "Number of physical floating point registers"
     )
-    numPhysVecRegs = Param.Unsigned(256, "Number of physical vector registers")
+    numPhysVecRegs = Param.Unsigned(224, "Number of physical vector registers")
     numPhysVecPredRegs = Param.Unsigned(
         32, "Number of physical predicate registers"
     )

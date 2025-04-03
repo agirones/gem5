@@ -85,19 +85,26 @@ kernel = "/cluster/projects/mast/full-system/kernels/x86-linux-kernel-5.4.0-105-
 #test_sys.init_param = args.init_param
 def config_cache(system):
 
-    dcache_class, icache_class, l2_cache_class, walk_cache_class = (
+    dcache_class, icache_class, l2_cache_class, l3_cache_class, walk_cache_class = (
         L1_DCache,
         L1_ICache,
         L2Cache,
+        L3Cache,
         None
     )
 
     system.cache_line_size = cacheline_size
 
+    l3_config = dict(
+        clk_domain=system.cpu_clk_domain,
+        size="6MiB",
+        assoc="12"
+    )
+
     l2_config = dict(
         clk_domain=system.cpu_clk_domain,
-        size="2MiB",
-        assoc="16"
+        size="1280KiB",
+        assoc="20"
     )
 
     l1i_config = dict(
@@ -106,15 +113,21 @@ def config_cache(system):
     )
 
     l1d_config = dict(
-        size="32KiB",
-        assoc="8"
+        size="48KiB",
+        assoc="12"
     )
+
+    system.l3 = l3_cache_class(**l3_config)
 
     system.l2 = l2_cache_class(**l2_config)
 
+    system.tol3bus = L3XBar(clk_domain=system.cpu_clk_domain)
+    system.l3.cpu_side = system.tol3bus.mem_side_ports
+    system.l3.mem_side = system.membus.cpu_side_ports
+
     system.tol2bus = L2XBar(clk_domain=system.cpu_clk_domain)
     system.l2.cpu_side = system.tol2bus.mem_side_ports
-    system.l2.mem_side = system.membus.cpu_side_ports
+    system.l2.mem_side = system.tol3bus.cpu_side_ports
 
     icache = icache_class(**l1i_config)
     dcache = dcache_class(**l1d_config)
@@ -164,7 +177,7 @@ def parseSimpoints(benchmark, interval_length, warmup_length, testsys):
 def get_sim_work_dir():
     run_dir = f"{root}/runs/{benchmark.name}"
     dirs = [x for x in os.listdir(run_dir) if x.startswith(f"cpt.simpoint_{args.simpoint_num}")]
-    assert(len(dirs) == 1)
+    assert len(dirs) == 1, f"Ensuring there is only one matching work_dir, matching dirs {dirs}"
     return dirs[0]
 
 bm = [SysConfig(
@@ -175,8 +188,11 @@ bm = [SysConfig(
 )]
 
 #(TestCPUClass, test_mem_mode, FutureClass) = Simulation.setCPUClass(args)
+if not args.mode == "simrun":
+    (TestCPUClass, test_mem_mode) = Simulation.getCPUClass("X86AtomicSimpleCPU")
+else:
+    (TestCPUClass, test_mem_mode) = Simulation.getCPUClass("X86O3CPU")
 
-(TestCPUClass, test_mem_mode) = Simulation.getCPUClass("X86AtomicSimpleCPU")
 
 
 num_cpus = 1
