@@ -107,6 +107,7 @@ class ChanneledMemory(AbstractMemorySystem):
         super().__init__()
         self._dram_class = dram_interface_class
         self._num_channels = num_channels
+        self._mem_ranges = []
 
         if not _isPow2(interleaving_size):
             raise ValueError("Memory interleaving size should be a power of 2")
@@ -125,14 +126,23 @@ class ChanneledMemory(AbstractMemorySystem):
         self._create_mem_interfaces_controller()
 
     def _create_mem_interfaces_controller(self):
-        self._dram = [
-            self._dram_class(addr_mapping=self._addr_mapping)
-            for _ in range(self._num_channels)
-        ]
+        if self._mem_ranges:
+            self._dram = [
+                self._dram_class(addr_mapping=self._addr_mapping)
+                for mem_range in self._mem_ranges
+                for _ in range(self._num_channels)
+            ]
 
-        self.mem_ctrl = [
-            MemCtrl(dram=self._dram[i]) for i in range(self._num_channels)
-        ]
+            self.mem_ctrl = [MemCtrl(dram=dram) for dram in self._dram]
+        else:
+            self._dram = [
+                self._dram_class(addr_mapping=self._addr_mapping)
+                for _ in range(self._num_channels)
+            ]
+
+            self.mem_ctrl = [
+                MemCtrl(dram=self._dram[i]) for i in range(self._num_channels)
+            ]
 
     def _get_dram_size(self, num_channels: int, dram: DRAMInterface) -> int:
         return num_channels * (
@@ -142,30 +152,39 @@ class ChanneledMemory(AbstractMemorySystem):
         )
 
     def _interleave_addresses(self):
-        if self._addr_mapping == "RoRaBaChCo":
-            rowbuffer_size = (
-                self._dram_class.device_rowbuffer_size.value
-                * self._dram_class.devices_per_rank.value
-            )
-            intlv_low_bit = log(rowbuffer_size, 2)
-        elif self._addr_mapping in ["RoRaBaCoCh", "RoCoRaBaCh"]:
-            intlv_low_bit = log(self._intlv_size, 2)
-        else:
-            raise ValueError(
-                "Only these address mappings are supported: "
-                "RoRaBaChCo, RoRaBaCoCh, RoCoRaBaCh"
-            )
-
+        """Interleave addresses across multiple memory ranges and channels."""
         intlv_bits = log(self._num_channels, 2)
-        for i, ctrl in enumerate(self.mem_ctrl):
-            ctrl.dram.range = AddrRange(
-                start=self._mem_range.start,
-                size=self._mem_range.size(),
-                intlvHighBit=intlv_low_bit + intlv_bits - 1,
-                xorHighBit=0,
-                intlvBits=intlv_bits,
-                intlvMatch=i,
-            )
+
+        for r_idx, mem_range in enumerate(self._mem_ranges):
+            if self._addr_mapping == "RoRaBaChCo":
+                rowbuffer_size = (
+                    self._dram_class.device_rowbuffer_size.value
+                    * self._dram_class.devices_per_rank.value
+                )
+                intlv_low_bit = log(rowbuffer_size, 2)
+            elif self._addr_mapping in ["RoRaBaCoCh", "RoCoRaBaCh"]:
+                intlv_low_bit = log(self._intlv_size, 2)
+            else:
+                raise ValueError(
+                    "Only these address mappings are supported: "
+                    "RoRaBaChCo, RoRaBaCoCh, RoCoRaBaCh"
+                )
+
+            for i, ctrl in enumerate(
+                self.mem_ctrl[
+                    r_idx
+                    * self._num_channels : (r_idx + 1)
+                    * self._num_channels
+                ]
+            ):
+                ctrl.dram.range = AddrRange(
+                    start=mem_range.start,
+                    size=mem_range.size(),
+                    intlvHighBit=intlv_low_bit + intlv_bits - 1,
+                    xorHighBit=0,
+                    intlvBits=intlv_bits,
+                    intlvMatch=i,
+                )
 
     @overrides(AbstractMemorySystem)
     def incorporate_memory(self, board: AbstractBoard) -> None:
@@ -195,17 +214,12 @@ class ChanneledMemory(AbstractMemorySystem):
 
     @overrides(AbstractMemorySystem)
     def set_memory_range(self, ranges: List[AddrRange]) -> None:
-        """Need to add support for non-contiguous non overlapping ranges in
-        the future.
-        """
-        if len(ranges) != 1 or ranges[0].size() != self._size:
-            raise Exception(
-                "Multi channel memory controller requires a single range "
-                "which matches the memory's size.\n"
-                f"The range size: {ranges[0].size()}\n"
-                f"This memory's size: {self._size}"
-            )
-        self._mem_range = ranges[0]
+        """Support multiple non-contiguous memory ranges."""
+        if not ranges:
+            raise Exception("No memory ranges provided!")
+
+        self._mem_ranges = ranges
+        self._create_mem_interfaces_controller()
         self._interleave_addresses()
 
     @overrides(AbstractMemorySystem)

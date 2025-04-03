@@ -136,12 +136,6 @@ class X86Board(AbstractSystemBoard, KernelDiskWorkload, SEBinaryWorkload):
                 self.get_cache_hierarchy().get_mem_side_port()
             )
 
-            # # Constants similar to x86_traits.hh
-            IO_address_space_base = 0x8000000000000000
-            pci_config_address_space_base = 0xC000000000000000
-            interrupts_address_space_base = 0xA000000000000000
-            APIC_range_size = 1 << 12
-
             self.bridge.ranges = [
                 AddrRange(0xC0000000, 0xFFFF0000),
                 AddrRange(
@@ -272,6 +266,8 @@ class X86Board(AbstractSystemBoard, KernelDiskWorkload, SEBinaryWorkload):
         self.workload.acpi_description_table_pointer.oem_id = "gem5"
         self.workload.acpi_description_table_pointer.rsdt.oem_id = "gem5"
         self.workload.acpi_description_table_pointer.xsdt.oem_id = "gem5"
+
+        # Setup e820 memory table
         entries = [
             # Mark the first megabyte of memory as reserved
             X86E820Entry(addr=0, size="639KiB", range_type=1),
@@ -279,15 +275,40 @@ class X86Board(AbstractSystemBoard, KernelDiskWorkload, SEBinaryWorkload):
             # Mark the rest of physical memory as available
             X86E820Entry(
                 addr=0x100000,
-                size=f"{self.mem_ranges[0].size() - 0x100000:d}B",
+                size="%dB" % (self.mem_ranges[0].size() - 0x100000),
                 range_type=1,
             ),
         ]
 
-        # Reserve the last 16KiB of the 32-bit address space for m5ops
+        # Mark [mem_size, 3iB) as reserved if memory less than 3GiB, which force
+        # IO devices to be mapped to [0xC0000000, 0xFFFF0000). Requests to this
+        # specific range can pass though bridge to iobus.
+        if len(self.mem_ranges) == 1:
+            entries.append(
+                X86E820Entry(
+                    addr=self.mem_ranges[0].size(),
+                    size="%dB" % (0xC0000000 - self.mem_ranges[0].size()),
+                    range_type=2,
+                )
+            )
+
+        # Reserve the last 16KiB of the 32-bit address space for the m5op interface
         entries.append(
             X86E820Entry(addr=0xFFFF0000, size="64KiB", range_type=2)
         )
+
+        # In case the physical memory is greater than 3GiB, we split it into two
+        # parts and add a separate e820 entry for the second part.  This entry
+        # starts at 0x100000000,  which is the first address after the space
+        # reserved for devices.
+        if len(self.mem_ranges) == 2:
+            entries.append(
+                X86E820Entry(
+                    addr=0x100000000,
+                    size="%dB" % (self.mem_ranges[1].size()),
+                    range_type=1,
+                )
+            )
 
         self.workload.e820_table.entries = entries
 
@@ -337,20 +358,33 @@ class X86Board(AbstractSystemBoard, KernelDiskWorkload, SEBinaryWorkload):
     @overrides(AbstractSystemBoard)
     def _setup_memory_ranges(self):
         memory = self.get_memory()
+        memory_size = memory.get_size()
 
-        if memory.get_size() > toMemorySize("3GiB"):
-            raise Exception(
-                "X86Board currently only supports memory sizes up "
-                "to 3GiB because of the I/O hole."
-            )
-        data_range = AddrRange(memory.get_size())
-        memory.set_memory_range([data_range])
+        LOW_MEM_LIMIT = toMemorySize("3GiB")
+        HIGH_MEM_START = 0x100000000
 
-        # Add the address range for the IO
-        self.mem_ranges = [
-            data_range,  # All data
-            AddrRange(0xC0000000, size=0x100000),  # For I/0
-        ]
+        if memory_size <= LOW_MEM_LIMIT:
+            # If memory is <= 3GiB, use a single range
+            data_range = AddrRange(memory_size)
+            self.mem_ranges = [
+                data_range,  # Low memory range
+            ]
+        else:
+            # Memory is > 3GiB, split into two ranges
+            low_size = LOW_MEM_LIMIT  # Allocate up to 3GiB in low memory
+            high_size = (
+                memory_size - LOW_MEM_LIMIT
+            )  # Remaining memory goes above 4GiB
+
+            self.mem_ranges = [
+                AddrRange(start=0, size=low_size),  # Lower memory range
+                AddrRange(
+                    start=HIGH_MEM_START, size=high_size
+                ),  # High memory range
+            ]
+
+        # Set memory ranges in the memory object
+        memory.set_memory_range(self.mem_ranges)
 
     @overrides(KernelDiskWorkload)
     def get_disk_device(self):
