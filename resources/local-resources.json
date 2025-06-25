@@ -1,0 +1,96 @@
+[
+    {
+        "category": "workload",
+        "id": "x86-ubuntu-24.04-boot-with-systemd",
+        "description": "A full boot of Ubuntu 24.04 with Linux 6.8.0-35-generic for X86. It runs `m5 exit` at specific times in the boot process. Please refer to the README for diskimage for more information. If specified the readfile will be executed after booting.",
+        "function": "set_kernel_disk_workload",
+        "resources": {
+            "kernel": {
+                "id": "x86-linux-kernel-6.8.0-35-generic",
+                "resource_version": "1.0.0"
+            },
+            "disk_image": {
+                "id": "x86-ubuntu-24.04-img",
+                "resource_version": "3.0.0"
+            }
+        },
+        "additional_params": {
+            "kernel_args": [
+                "earlyprintk=ttyS0",
+                "console=ttyS0",
+                "lpj=7999923",
+                "root=/dev/sda2"
+            ]
+        },
+        "architecture": "X86",
+        "size": 0,
+        "tags": [],
+        "code_examples": [],
+        "license": "",
+        "author": [],
+        "source_url": "",
+        "resource_version": "4.0.0",
+        "gem5_versions": [
+            "23.1",
+            "24.0",
+            "24.1"
+        ],
+        "example_usage": "workload = board.set_workload(obtain_resource(resource_id=\"x86-ubuntu-24.04-boot-with-systemd\"))\ndef exit_event_handler():\n    print('first exit event: Kernel booted')\n    yield False\n    print('second exit event: In after boot')\n    yield False\n    print('third exit event: After run script')\n    yield True\n\nsimulator = Simulator(\n    board=board,\n    on_exit_event={\n        ExitEvent.EXIT: exit_event_handler(),\n    },\n)"
+    },
+    {
+        "category": "disk-image",
+        "id": "x86-ubuntu-24.04-img",
+        "description": "A disk image containing Ubuntu 24.04 for x86. This image will run an `m5 readfile` instruction after booting. This diskimage will run m5 exit events 3 times: when kernel is booted, when after_boot script is run and after the run script is run.",
+        "architecture": "X86",
+        "size": 8464105472,
+        "tags": [
+            "x86",
+            "fullsystem"
+        ],
+        "is_zipped": false,
+        "md5sum": "11877c45719971efddbd1e2d26b64b0a",
+        "source": "src/ubuntu-generic-diskimages",
+        "url": "file:///cluster/home/andreug/research/gem5-resources/src/spec-2017/disk-image/spec-2017/spec-2017-image/spec-2017",
+        "root_partition": "1",
+        "code_examples": [],
+        "license": "",
+        "author": [
+            "Andreu Girones"
+        ],
+        "source_url": "https://github.com/gem5/gem5-resources/tree/4a1ac0653e34cbb1a6f44eb78e89d22272918274/src/ubuntu-generic-diskimages",
+        "resource_version": "3.0.0",
+        "gem5_versions": [
+            "24.0",
+            "24.1"
+        ],
+        "example_usage": "workload = board.set_kernel_disk_workload(\n    kernel=//obtain kernel,\n    disk_image=obtain_resource(resource_id=\"x86-ubuntu-24.04-img\"),\n    bootloader=//bootloader resource,\n)\ndef exit_event_handler():\n    print('first exit event: Kernel booted')\n    yield False\n    print('second exit event: In after boot')\n    yield False\n    print('third exit event: After run script')\n    yield True\n\nsimulator = Simulator(\n    board=board,\n    on_exit_event={\n        ExitEvent.EXIT: exit_event_handler(),\n    },\n)",
+        "is_tar_archive": false
+    },
+    {
+        "category": "kernel",
+        "id": "x86-linux-kernel-6.8.0-35-generic",
+        "description": "The linux kernel (v6.8.0-35-generic), extracted with the x86-ubuntu-24.04 image.",
+        "architecture": "X86",
+        "size": 64582420,
+        "tags": [
+            "linux-kernel"
+        ],
+        "is_zipped": false,
+        "md5sum": "d14fb7961a51844cf5489ae7fa5a5c7b",
+        "url": "file:///cluster/home/andreug/research/gem5-resources/src/spec-2017/gem5/resources/x86-linux-kernel-6.8.0-35-generic",
+        "code_examples": [],
+        "license": "",
+        "author": [
+            "Harshil Patel"
+        ],
+        "source_url": "",
+        "resource_version": "1.0.0",
+        "gem5_versions": [
+            "23.0",
+            "23.1",
+            "24.0",
+            "24.1"
+        ],
+        "example_usage": "obtain_resource(resource_id=\"x86-linux-kernel-6.8.0-35-generic\")"
+    }
+]
