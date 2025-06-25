@@ -47,7 +47,11 @@ from m5.objects import (
     VoltageDomain,
 )
 
-from ...resources.resource import WorkloadResource
+from ...resources.resource import (
+    WorkloadResource,
+    SimpointDirectoryResource,
+    SimpointResource,
+)
 from .mem_mode import (
     MemMode,
     mem_mode_to_string,
@@ -255,6 +259,41 @@ class AbstractBoard:
                 )
 
         func(**workload.get_parameters())
+
+    def set_simpoint_workload(
+            self, 
+            workload: WorkloadResource,
+            simpoint: SimpointResource = None,
+    ) -> None:
+        """Set up the system to run a SimPoint workload.
+
+        **Limitations**
+        * Only supports single threaded applications.
+        * Dynamically linked executables are partially supported when the host
+          ISA and the simulated ISA are the same.
+
+        .. warning::
+
+            SimPoints only works with one core
+
+        :param simpoint: The SimpointResource that contains the list of
+                         SimPoints starting instructions, the list of
+                         weights, and the SimPoints interval.
+        :param checkpoint: The checkpoint directory. Used to restore the
+                           simulation to that checkpoint.
+        """
+
+        self._simpoint_resource = simpoint
+
+        if self.get_processor().get_num_cores() > 1:
+            warn("SimPoints only works with one core")
+        self.get_processor().get_cores()[0]._set_simpoint(
+            inst_starts=self._simpoint_resource.get_simpoint_start_insts(),
+            board_initialized=False,
+        )
+
+        # Call set_workload after SimPoint setup is complete
+        self.set_workload(workload)
 
     @abstractmethod
     def _setup_board(self) -> None:
