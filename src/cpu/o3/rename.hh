@@ -536,6 +536,14 @@ class Rename
         statistics::Scalar tempSerializing;
         /** Number of instructions inserted into skid buffers. */
         statistics::Scalar skidInsts;
+        /** Stat for the total number of cycles rename has blocked due to ROB full. */
+        statistics::Scalar ROBFullCycles;
+        /** Stat for the total number of cycles rename has blocked due to IQ full. */
+        statistics::Scalar IQFullCycles;
+        /** Stat for the total number of cycles rename has blocked due to LQ full. */
+        statistics::Scalar LQFullCycles;
+        /** Stat for the total number of cycles rename has blocked due to SQ full. */
+        statistics::Scalar SQFullCycles;
     } stats;
 };
 
