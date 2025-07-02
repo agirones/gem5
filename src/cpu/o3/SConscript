@@ -58,6 +58,7 @@ if env['CONF']['BUILD_ISA']:
     Source('thread_state.cc')
 
     DebugFlag('CommitRate')
+    DebugFlag('DispatchMicroop')
     DebugFlag('IEW')
     DebugFlag('IQ')
     DebugFlag('LSQ')
