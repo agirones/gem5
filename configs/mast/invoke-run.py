@@ -28,6 +28,29 @@ parser.add_argument(
     help="which mode to run, valid options are cpt, profile, simtake, simrun"
 )
 
+parser.add_argument(
+    "--cpu-width",
+    type=int,
+    required=False,
+    help="Width for the backend of the processor: decode, rename, dispatch, issue, wb and commit."
+)
+
+parser.add_argument(
+    "--output-dir",
+    type=str,
+    required=False,
+    default="/cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/runs/output",
+    help="Base directory where simulation outputs and run-specific data will be stored."
+)
+
+parser.add_argument(
+    "--config",
+    type=str,
+    required=False,
+    default="_default_config",
+    help="Path or name of the gem5 configuration script to use (e.g., 'configs/my_system.py' or 'custom_config')."
+)
+
 args = parser.parse_args()
 
 
@@ -35,27 +58,30 @@ benchmark = ALL_BENCHMARKS[args.benchmark_num]
 
 root = os.getcwd()
 
+if args.config == "_default_config":
+    args.config = f"{root}/configs/mast/profile-config-legacy.py"
+
 def setup_run_dir():
-    tgt = f"{root}/runs/{benchmark.name}"
+    tgt = f"{args.output_dir}/width{args.cpu_width}/{benchmark.name}"
     if os.path.exists(tgt):
         shutil.rmtree(tgt)
-    os.mkdir(tgt)
+    os.makedirs(tgt, exist_ok=True)
     os.chdir(tgt)
 
 def cleanup():
     os.chdir(root)
 
 def setup_cpt_dir(cpt):
-    tgt = f"{root}/runs/{benchmark.name}/{cpt}"
+    tgt = f"{args.output_dir}/width{args.cpu_width}/{benchmark.name}/{cpt}"
     if os.path.exists(tgt):
         shutil.rmtree(tgt)
-    os.mkdir(tgt)
+    os.makedirs(tgt, exist_ok=True)
     os.chdir(tgt)
 
 if not args.mode == "simrun":
     setup_run_dir()
     subprocess.run([f"{root}/build/X86/gem5.opt",
-                f"{root}/configs/mast/profile-config-legacy.py",
+                f"{args.config}",
                 "--benchmark-num", str(args.benchmark_num),
                 "--mode", args.mode])
     cleanup()
@@ -67,7 +93,7 @@ if not args.mode == "simrun":
 simpoint_cpt_dir = "/cluster/projects/mast/checkpoints/simpoint-checkpoints"
 cpts = os.listdir(f"{simpoint_cpt_dir}/{benchmark.name}-cpt")
 cpts.sort()
-assert(len(cpts) > 0)
+#assert(len(cpts) > 0)
 
 setup_run_dir()
 
@@ -75,8 +101,14 @@ for i in range(len(cpts)):
     cpt = cpts[i]
     setup_cpt_dir(cpt)
     subprocess.run([f"{root}/build/X86/gem5.opt",
-                    f"{root}/configs/mast/profile-config-legacy.py",
+#                    "--debug-flags=O3PipeView",
+#                    "--debug-file=trace.out",
+#                    "--debug-start=1342141375473",
+#                    "--debug-end=1464957618957",
+                    f"{args.config}",
                     "--benchmark-num", str(args.benchmark_num),
                     "--mode", args.mode,
-                    "--simpoint-num", str(i)])
+                    "--simpoint-num", str(i),
+                    "--cpu-width", str(args.cpu_width),
+                    "--run-base-dir", args.output_dir])
     cleanup()
