@@ -66,6 +66,7 @@
 #include "cpu/o3/scoreboard.hh"
 #include "cpu/timebuf.hh"
 #include "debug/Activity.hh"
+#include "debug/DispatchMicroop.hh"
 #include "debug/Drain.hh"
 #include "debug/IEW.hh"
 #include "debug/WakeUp.hh"
@@ -73,6 +74,12 @@
 #include "enums/OpClass.hh"
 #include "sim/cur_tick.hh"
 #include "sim/probe/probe.hh"
+
+
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <iomanip>
 
 namespace gem5
 {
@@ -987,6 +994,63 @@ IEW::dispatchInsts(ThreadID tid)
 
         // Make sure there's a valid instruction there.
         assert(inst);
+
+        if (gem5::debug::DispatchMicroop) {
+            StaticInstPtr macroop_inst = inst->macroop;
+            std::string macroop_info;
+            if (macroop_inst) {
+                std::ostringstream numSrcRegsStream, numDestRegsStream;
+                numSrcRegsStream << macroop_inst->numSrcRegs();
+                numDestRegsStream << macroop_inst->numDestRegs();
+                macroop_info = "Macro-op: Name = " + macroop_inst->getName() +
+                               ", numSrcRegs = " + numSrcRegsStream.str() +
+                               " numDestRegs = " + numDestRegsStream.str();
+            } else {
+                macroop_info = "Macro-op: Unknown";
+            }
+
+            std::string dest_regs;
+            for (int i = 0; i < inst->numDestRegs(); ++i) {
+                dest_regs += inst->flattenedDestIdx(i).className();
+                if (i < inst->numDestRegs() - 1) {
+                    dest_regs += ", ";
+                }
+            }
+
+            std::string src_regs;
+            for (int i = 0; i < inst->numSrcRegs(); ++i) {
+                src_regs += inst->renamedSrcIdx(i)->className();
+                if (i < inst->numSrcRegs() - 1) {
+                    src_regs += ", ";
+                }
+            }
+
+            gem5::cp::Format fmt;
+            std::ostringstream os_name;
+            gem5::cp::formatString(os_name, inst->staticInst->getName(), fmt);
+            std::string name_str = os_name.str();
+
+            std::ostringstream os_dest;
+            gem5::cp::formatString(os_dest, dest_regs, fmt);
+            std::string dest_str = os_dest.str();
+
+            std::ostringstream os_src;
+            gem5::cp::formatString(os_src, src_regs, fmt);
+            std::string src_str = os_src.str();
+            
+
+            DPRINTF(DispatchMicroop,
+                    "-------------------------------------------------------------------\n"
+                    "[tid:%i] Dispatching Micro-op [sn:%lli] of %s\n"
+                    "  Name: %-15s Dest Regs: [%-10s] Src Regs: [%-10s] OpClass: %s\n",
+                    tid,
+                    inst->seqNum,
+                    macroop_info,
+                    name_str.c_str(),
+                    dest_str.c_str(),
+                    src_str.c_str(),
+                    gem5::enums::OpClassStrings[inst->opClass()]);
+        }
 
         DPRINTF(IEW, "[tid:%i] Issue: Adding PC %s [sn:%lli] [tid:%i] to "
                 "IQ.\n",

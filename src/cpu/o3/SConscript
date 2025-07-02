@@ -76,6 +76,7 @@ if env['CONF']['BUILD_ISA']:
     DebugFlag('BAC')
     DebugFlag('CommitRate')
     DebugFlag('FTQ')
+    DebugFlag('DispatchMicroop')
     DebugFlag('IEW')
     DebugFlag('IQ')
     DebugFlag('LSQ')
