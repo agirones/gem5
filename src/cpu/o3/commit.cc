@@ -117,7 +117,7 @@ Commit::Commit(CPU *_cpu, const BaseO3CPUParams &params)
       trapLatency(params.trapLatency),
       canHandleInterrupts(true),
       avoidQuiesceLiveLock(false),
-      stats(_cpu, this)
+      stats(_cpu, this, params)
 {
     if (commitWidth > MaxWidth)
         fatal("commitWidth (%d) is larger than compiled limit (%d),\n"
@@ -166,7 +166,7 @@ Commit::regProbePoints()
             cpu->getProbeManager(), "Squash");
 }
 
-Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
+Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit, const BaseO3CPUParams &params)
     : statistics::Group(cpu, "commit"),
       ADD_STAT(status, statistics::units::Cycle::get(),
                "Commit status cycles"),
@@ -186,7 +186,10 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
       ADD_STAT(committedInstType, statistics::units::Count::get(),
                "Class of committed instruction"),
       ADD_STAT(commitEligibleSamples, statistics::units::Cycle::get(),
-               "number cycles where commit BW limit reached")
+               "number cycles where commit BW limit reached"),
+      ADD_STAT(robOccupancy, statistics::units::Count::get(),
+               "ROB Occupancy when an instruction is inserted to the ROB")
+
 {
     using namespace statistics;
 
@@ -216,6 +219,10 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
         .flags(total | pdf | dist);
 
     committedInstType.ysubnames(enums::OpClassStrings);
+
+    robOccupancy
+        .init(0,params.numROBEntries,1)
+        .flags(statistics::pdf);
 }
 
 void
@@ -1318,6 +1325,7 @@ Commit::getInsts()
                     tid, inst->seqNum, inst->pcState());
 
             rob->insertInst(inst);
+            stats.robOccupancy.sample(rob->getThreadEntries(tid));
 
             assert(rob->getThreadEntries(tid) <= rob->getMaxEntries(tid));
 
