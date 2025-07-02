@@ -466,7 +466,7 @@ class Commit
 
     struct CommitStats : public statistics::Group
     {
-        CommitStats(CPU *cpu, Commit *commit);
+        CommitStats(CPU *cpu, Commit *commit, const BaseO3CPUParams &params);
         /** Stat for the total number of squashed instructions discarded by
          * commit.
          */
@@ -493,6 +493,9 @@ class Commit
 
         /** Number of cycles where the commit bandwidth limit is reached. */
         statistics::Scalar commitEligibleSamples;
+
+        /** ROB Occupancy when an instruction is inserted to the ROB. */
+        statistics::Distribution robOccupancy;
     } stats;
 
 };
