@@ -160,8 +160,15 @@ Rename::RenameStats::RenameStats(statistics::Group *parent)
       ADD_STAT(intReturned, statistics::units::Count::get(),
                "count of registers freed and written back to integer free list"),
       ADD_STAT(fpReturned, statistics::units::Count::get(),
-               "count of registers freed and written back to floating point free list")
-
+               "count of registers freed and written back to floating point free list"),
+      ADD_STAT(ROBFullCycles, statistics::units::Count::get(),
+               "Number of cycles rename has blocked due to ROB full"),
+      ADD_STAT(IQFullCycles, statistics::units::Count::get(),
+               "Number of cycles rename has blocked due to IQ full"),
+      ADD_STAT(LQFullCycles, statistics::units::Count::get(),
+               "Number of cycles rename has blocked due to LQ full" ),
+      ADD_STAT(SQFullCycles, statistics::units::Count::get(),
+               "Number of cycles rename has blocked due to SQ full")
 {
     status.init(ThreadStatusMax).flags(statistics::pdf | statistics::nozero);
     for (int i = 0; i < ThreadStatusMax; ++i) {
@@ -194,6 +201,10 @@ Rename::RenameStats::RenameStats(statistics::Group *parent)
 
     intReturned.prereq(intReturned);
     fpReturned.prereq(fpReturned);
+    ROBFullCycles.prereq(ROBFullCycles);
+    IQFullCycles.prereq(IQFullCycles);
+    LQFullCycles.prereq(LQFullCycles);
+    SQFullCycles.prereq(SQFullCycles);
 }
 
 void
@@ -1298,14 +1309,21 @@ Rename::checkStall(ThreadID tid)
     if (stalls[tid].iew) {
         DPRINTF(Rename,"[tid:%i] Stall from IEW stage detected.\n", tid);
         ret_val = true;
-    } else if (calcFreeROBEntries(tid) <= 0) {
+    } if (calcFreeROBEntries(tid) <= 0) {
         DPRINTF(Rename,"[tid:%i] Stall: ROB has 0 free entries.\n", tid);
+        ++stats.ROBFullCycles;
         ret_val = true;
     } else if (calcFreeIQEntries(tid) <= 0) {
         DPRINTF(Rename,"[tid:%i] Stall: IQ has 0 free entries.\n", tid);
+        ++stats.IQFullCycles;
         ret_val = true;
-    } else if (calcFreeLQEntries(tid) <= 0 && calcFreeSQEntries(tid) <= 0) {
-        DPRINTF(Rename,"[tid:%i] Stall: LSQ has 0 free entries.\n", tid);
+    } else if (calcFreeLQEntries(tid) <= 0) {
+        DPRINTF(Rename,"[tid:%i] Stall: LQ has 0 free entries.\n", tid);
+        ++stats.LQFullCycles;
+        ret_val = true;
+    } else if (calcFreeSQEntries(tid) <= 0) {
+        DPRINTF(Rename,"[tid:%i] Stall: SQ has 0 free entries.\n", tid);
+        ++stats.SQFullCycles;
         ret_val = true;
     } else if (renameStatus[tid] == SerializeStall &&
                (!emptyROB[tid] || instsInProgress[tid])) {
