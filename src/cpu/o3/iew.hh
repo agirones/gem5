@@ -518,7 +518,30 @@ class IEW
         statistics::Scalar noWakeupCondCtrlInst;
         /** Stat for total number of unconditional control instructions that don't wake up any instruction. */
         statistics::Scalar noWakeupUncondCtrlInst;
-
+        /**Stat for number of instructions that have executed and have a destination register*/
+        statistics::Scalar execHasDestRegs;
+        /**Histogram of how many instructions wakes up an instruction that has a destination register*/
+        statistics::Distribution wakeupHasDestRegsHist;
+        /**Histogram of how many instructions there are in the IQ when an instruction produces a value*/
+        statistics::Distribution iqOccupancyHist;
+        /**Stat for number of instructions that have wake up any other instruction it the IQ*/
+        statistics::Scalar execHasIQConsumers;
+        /**Histogram of how many instructions wakes up an instruction that has consumers for its produced value in the IQ*/
+        statistics::Distribution wakeupHasIQConsumersHist;
+        /**Stat for number of instructions that have produced a value but have no consumers in the IQ*/
+        statistics::Scalar execHasNoIQConsumers;
+        /**Stat for number of instructions that have executed and do not have destination registers*/
+        statistics::Scalar execNoDestRegs;
+        /**Histogram for the number of non ready operands in the IQ when a value is produced*/
+        statistics::Distribution nonReadyInIQHist;
+        /**Stat for number of stores that have executed and have destination registers*/
+        statistics::Scalar execHasDestRegsStore;
+        /**Stat for number of control instructions that have executed and have destination registers*/
+        statistics::Scalar execHasDestRegsControl;
+        /**Stat for number of stores that have executed and do not have destination registers*/
+        statistics::Scalar execNoDestRegsStore;
+        /**Stat for number of control instructions that have executed and do not have destination registers*/
+        statistics::Scalar execNoDestRegsControl;
     } iewStats;
 };
 

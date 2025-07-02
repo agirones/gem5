@@ -277,6 +277,18 @@ class InstructionQueue
     /** Debug function to print all instructions. */
     void printInsts();
 
+    /** Get the number of inflight non ready operands. */
+    unsigned getNumNonReadyOperands() { return numNonReadyOperands; };
+
+    /** Set the number of inflight non ready operands. */
+    void setNumNonReadyOperands(unsigned value) { numNonReadyOperands = value; };
+
+    /** Decrement the number of inflight non ready operands. */
+    void decrementNonReadyOperands() { --numNonReadyOperands; };
+
+    /** Increment the number of inflight non ready operands. */
+    void incrementNonReadyOperands() { ++numNonReadyOperands; };
+
   private:
     /** Does the actual squashing. */
     void doSquash(ThreadID tid);
@@ -479,6 +491,9 @@ class InstructionQueue
      *  IQ.
      */
     void dumpInsts();
+
+    /** The number of inflight non ready operands. */
+    unsigned numNonReadyOperands;
 
     struct IQStats : public statistics::Group
     {

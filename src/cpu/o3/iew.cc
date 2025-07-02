@@ -242,7 +242,31 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     ADD_STAT(noWakeupCondCtrlInst, statistics::units::Count::get(),
              "Stat for total number of conditional control instructions that don't wake up any instruction"),
     ADD_STAT(noWakeupUncondCtrlInst, statistics::units::Count::get(),
-             "Stat for total number of unconditional control instructions that don't wake up any instruction")
+             "Stat for total number of unconditional control instructions that don't wake up any instruction"),
+    ADD_STAT(execHasDestRegs, statistics::units::Count::get(),
+             "Stat for number of instructions that have executed and have a destination register"),
+    ADD_STAT(wakeupHasDestRegsHist, statistics::units::Count::get(),
+             "Histogram of how many instructions wakes up an instruction that has a destination register"),
+    ADD_STAT(iqOccupancyHist, statistics::units::Count::get(),
+             "Histogram of how many instructions there are in the IQ when an instruction produces a value"),
+    ADD_STAT(execHasIQConsumers, statistics::units::Count::get(),
+             "Stat for number of instructions that have wake up any other instruction it the IQ"),
+    ADD_STAT(wakeupHasIQConsumersHist, statistics::units::Count::get(),
+             "Histogram of how many instructions wakes up an instruction that has consumers for its produced value in the IQ"),
+    ADD_STAT(execHasNoIQConsumers, statistics::units::Count::get(),
+             "Stat for number of instructions that have produced a value but have no consumers in the IQ"),
+    ADD_STAT(execNoDestRegs, statistics::units::Count::get(),
+             "Stat for number of instructions that have executed and do not have destination registers"),
+    ADD_STAT(nonReadyInIQHist, statistics::units::Count::get(),
+             "Histogram for the number of non ready operands in the IQ when a value is produced"),
+    ADD_STAT(execHasDestRegsStore, statistics::units::Count::get(),
+             "Stat for number of stores that have executed and have destination registers"),
+    ADD_STAT(execHasDestRegsControl, statistics::units::Count::get(),
+             "Stat for number of control instructions that have executed and have destination registers"),
+    ADD_STAT(execNoDestRegsStore, statistics::units::Count::get(),
+             "Stat for number of stores that have executed and do not have destination registers"),
+    ADD_STAT(execNoDestRegsControl, statistics::units::Count::get(),
+             "Stat for number of control instructions that have executed and do not have destination registers")
 {
     instsToCommit
         .init(cpu->numThreads)
@@ -298,6 +322,22 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
 
     instWakeupThreeOrMorePerCycle
         .init(0,params.wbWidth,1)
+        .flags(statistics::pdf);
+
+    wakeupHasDestRegsHist
+        .init(0,params.numIQEntries,1)
+        .flags(statistics::pdf);
+
+    iqOccupancyHist
+        .init(0,params.numIQEntries,1)
+        .flags(statistics::pdf);
+
+    wakeupHasIQConsumersHist
+        .init(0,params.numIQEntries,1)
+        .flags(statistics::pdf);
+
+    nonReadyInIQHist
+        .init(0,params.numIQEntries * 8,1)
         .flags(statistics::pdf);
 
     noWakeupInstType
@@ -1549,6 +1589,26 @@ IEW::writebackInsts()
 
             if(inst->numDestRegs()){
                 nProd++;
+                ++iewStats.execHasDestRegs;
+                iewStats.wakeupHasDestRegsHist.sample(dependents);
+                iewStats.iqOccupancyHist.sample(instQueue.getCount(inst->threadNumber));
+                iewStats.nonReadyInIQHist.sample(instQueue.getNumNonReadyOperands());
+                if(inst->isStore())
+                    ++iewStats.execHasDestRegsStore;
+                if(inst->isControl())
+                    ++iewStats.execHasDestRegsControl;
+                if(dependents){
+                    ++iewStats.execHasIQConsumers;
+                    iewStats.wakeupHasIQConsumersHist.sample(dependents);
+                } else{
+                    ++iewStats.execHasNoIQConsumers;
+                }
+            } else{
+                ++iewStats.execNoDestRegs;
+                if(inst->isStore())
+                    ++iewStats.execNoDestRegsStore;
+                if(inst->isControl())
+                    ++iewStats.execNoDestRegsControl;
             }
 
             if (dependents) {
