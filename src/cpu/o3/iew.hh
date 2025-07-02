@@ -437,6 +437,18 @@ class IEW
         statistics::Scalar dispStoreInsts;
         /** Stat for total number of dispatched non speculative insts. */
         statistics::Scalar dispNonSpecInsts;
+        /** Stat for total number of dispatched non-speculative control instructions. */
+        statistics::Scalar dispControl;
+        /** Stat for total number of dispatched non-speculative call instructions. */
+        statistics::Scalar dispCall;
+        /** Stat for total number of dispatched non-speculative return instructions. */
+        statistics::Scalar dispReturn;
+        /** Histogram of the number of source operands per microop at dispatch. */
+        statistics::Distribution dispatchedNumSrcOperands;
+        /** Histogram of the number of non ready source operands per microop at dispatch. */
+        statistics::Distribution dispatchedNonReadyOperands;
+        /** Histogram of the number of ready source operands per microop with dest reg at dispatch. */
+        statistics::Distribution dispatchedNonReadyOperandsHasDestReg;
         /** Stat for number of times the IQ becomes full. */
         statistics::Scalar iqFullEvents;
         /** Stat for number of times the LSQ becomes full. */
