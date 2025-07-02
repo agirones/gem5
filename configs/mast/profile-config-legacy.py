@@ -25,6 +25,14 @@ from common.Caches import *
 from common.FSConfig import *
 from common.SysPaths import *
 
+from m5.objects.Prefetcher import (
+    PIFPrefetcher,
+#    STeMSPrefetcher,
+#    BOPPrefetcher,
+    DCPTPrefetcher,
+    StridePrefetcher
+)
+
 from benchmarks import ALL_BENCHMARKS
 
 
@@ -97,6 +105,45 @@ kernel_cmd = " ".join([
 kernel = "/cluster/projects/mast/full-system/kernels/x86-linux-kernel-5.4.0-105-generic"
 
 
+def config_system(system):
+    for cpu in system.cpu:
+#        for fupool in cpu.fuPool.FUList:
+#            fupool.count = 8
+        
+        fu_list = cpu.fuPool.FUList[0].count = 5
+        fu_list = cpu.fuPool.FUList[1].count = 3
+        fu_list = cpu.fuPool.FUList[4].count = 3
+        fu_list = cpu.fuPool.FUList[5].count = 2
+        fu_list = cpu.fuPool.FUList[7].count = 2
+        fu_list = cpu.fuPool.FUList[8].count = 0
+
+        cpu.fetchWidth = args.cpu_width
+        cpu.decodeWidth = args.cpu_width
+        cpu.renameWidth = args.cpu_width
+        cpu.dispatchWidth = args.cpu_width
+        cpu.issueWidth = args.cpu_width
+        cpu.wbWidth = args.cpu_width
+        cpu.commitWidth = args.cpu_width
+
+        cpu.numIQEntries = 205
+        cpu.numPhysFloatRegs = 332
+        cpu.numPhysIntRegs = 280
+        cpu.numROBEntries = 512
+        cpu.LQEntries = 192
+        cpu.SQEntries = 114
+
+        cpu.backComSize = 30
+        cpu.forwardComSize = 512
+
+        cpu.dtb_walker_cache.assoc = 8
+        cpu.dtb_walker_cache.data_latency = 1
+        cpu.dtb_walker_cache.tag_latency = 1
+
+        cpu.itb_walker_cache.assoc = 8
+        cpu.itb_walker_cache.data_latency = 1
+        cpu.itb_walker_cache.tag_latency = 1
+
+
 #test_sys.init_param = args.init_param
 def config_cache(system):
 
@@ -112,29 +159,67 @@ def config_cache(system):
 
     l3_config = dict(
         clk_domain=system.cpu_clk_domain,
-        size="6MiB",
-        assoc="12"
+#        size="6MiB",
+#        assoc="12",
+        tag_latency="35",
+        data_latency="35",
+        size="3MiB",
+        assoc="12",
+#        tag_latency="40",
+#        data_latency="40",
     )
 
     l2_config = dict(
         clk_domain=system.cpu_clk_domain,
-        size="1280KiB",
-        assoc="20"
+#        size="1280KiB",
+#        assoc="20",
+        tag_latency="11",
+        data_latency="11",
+        size="1MiB",
+        assoc="16",
+#        tag_latency="12",
+#        data_latency="12",
     )
 
     l1i_config = dict(
         size="32KiB",
-        assoc="8"
+        assoc="8",
+#        tag_latency="2",
+#        data_latency="2",
+        tag_latency="1",
+        data_latency="1",
+#        tag_latency="1",
+#        data_latency="1",
     )
 
     l1d_config = dict(
-        size="48KiB",
-        assoc="12"
+#        size="48KiB",
+#        assoc="12",
+#        tag_latency="2",
+#        data_latency="2",
+#        tag_latency="5",
+#        data_latency="5",
+        size="32KiB",
+        assoc="8",
+        tag_latency="1",
+        data_latency="1",
     )
 
     system.l3 = l3_cache_class(**l3_config)
+    system.l3.prefetcher = DCPTPrefetcher()
+#    system.l3.prefetcher = STeMSPrefetcher(active_generation_table_entries = "256",
+#                                           active_generation_table_assoc = 256,
+#                                           pattern_sequence_table_entries = "65536",
+#                                           pattern_sequence_table_assoc = 65536,
+#                                           region_miss_order_buffer_entries = 524288,
+#                                           reconstruction_entries = 1024)
 
     system.l2 = l2_cache_class(**l2_config)
+    system.l2.prefetcher = DCPTPrefetcher()
+#    system.l2.prefetcher = BOPPrefetcher(bad_score = 1,
+#                                         offset_list_size = 52,
+#                                         rr_size = 256
+#                                         )
 
     system.tol3bus = L3XBar(clk_domain=system.cpu_clk_domain)
     system.l3.cpu_side = system.tol3bus.mem_side_ports
@@ -145,7 +230,11 @@ def config_cache(system):
     system.l2.mem_side = system.tol3bus.cpu_side_ports
 
     icache = icache_class(**l1i_config)
+    icache.prefetcher = PIFPrefetcher()
+
     dcache = dcache_class(**l1d_config)
+    dcache.prefetcher = StridePrefetcher()
+#    dcache.prefetcher = BOPPrefetcher()
 
     iwalkcache = PageTableWalkerCache()
     dwalkcache = PageTableWalkerCache()
@@ -274,7 +363,8 @@ test_sys.cpu = [
     TestCPUClass(clk_domain=test_sys.cpu_clk_domain, cpu_id=i)
     for i in range(num_cpus)
 ]
-bpClass = ObjectList.bp_list.get("MultiperspectivePerceptronTAGE64KB")
+#bpClass = ObjectList.bp_list.get("MultiperspectivePerceptronTAGE64KB")
+bpClass = ObjectList.bp_list.get("LTAGE")
 test_sys.cpu[0].branchPred = bpClass()
 
 # TODO: find out why Ruby is like this
@@ -311,6 +401,8 @@ else:
 
     config_cache(test_sys)
     MemConfig.config_mem(args, test_sys)
+
+config_system(test_sys)
 
 # Everything before was getting the system ready
 # We now configure the run
