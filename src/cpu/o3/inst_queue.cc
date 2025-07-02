@@ -283,6 +283,7 @@ InstructionQueue::InstructionQueue(CPU *cpu_ptr, IEW *iew_ptr,
 
 InstructionQueue::~InstructionQueue()
 {
+    setNumNonReadyOperands(0);
     dependGraph.reset();
 #ifdef GEM5_DEBUG
     cprintf("Nodes traversed: %i, removed: %i\n",
@@ -548,6 +549,7 @@ InstructionQueue::resetState()
     blockedMemInsts.clear();
     retryMemInsts.clear();
     wbOutstanding = 0;
+    setNumNonReadyOperands(0);
 }
 
 void
@@ -1206,6 +1208,7 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
             dep_inst = dependGraph.pop(dest_reg->flatIndex());
 
             ++dependents;
+            decrementNonReadyOperands();
         }
 
         // Reset the head node now that all of its dependents have
@@ -1427,6 +1430,7 @@ InstructionQueue::doSquash(ThreadID tid)
                         !src_reg->isAlwaysReady()) {
                         dependGraph.remove(src_reg->flatIndex(),
                                            squashed_inst);
+                        decrementNonReadyOperands();
                     }
 
                     ++iqStats.squashedOperandsExamined;
@@ -1526,6 +1530,8 @@ InstructionQueue::addToDependents(const DynInstPtr &new_inst)
                         "is being added to the dependency chain.\n",
                         new_inst->pcState(), src_reg->index(),
                         src_reg->className());
+
+                incrementNonReadyOperands();
 
                 dependGraph.insert(src_reg->flatIndex(), new_inst);
 
