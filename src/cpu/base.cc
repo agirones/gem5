@@ -1039,7 +1039,11 @@ CommitCPUStats::CommitCPUStats(statistics::Group *parent, int thread_id)
     ADD_STAT(committedInstType, statistics::units::Count::get(),
             "Class of committed instruction."),
     ADD_STAT(committedControl, statistics::units::Count::get(),
-             "Class of control type instructions committed")
+             "Class of control type instructions committed"),
+    ADD_STAT(numStores, statistics::units::Count::get(),
+             "Number of stores ISA instructions committed"),
+    ADD_STAT(numControl, statistics::units::Count::get(),
+             "Number of control flow ISA instructions committed")
 {
     numInsts
         .prereq(numInsts);

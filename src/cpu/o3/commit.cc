@@ -1357,6 +1357,10 @@ Commit::updateComInstStats(const DynInstPtr &inst)
 
     if (!inst->isMicroop() || inst->isLastMicroop()) {
         cpu->commitStats[tid]->numInsts++;
+        if (inst->isStore())
+            cpu->commitStats[tid]->numStores++;
+        if (inst->isControl())
+            cpu->commitStats[tid]->numControl++;
         cpu->baseStats.numInsts++;
     }
     cpu->commitStats[tid]->numOps++;
