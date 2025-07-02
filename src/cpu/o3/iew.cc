@@ -193,6 +193,18 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
                "Number of dispatched store instructions"),
       ADD_STAT(dispNonSpecInsts, statistics::units::Count::get(),
                "Number of dispatched non-speculative instructions"),
+      ADD_STAT(dispControl, statistics::units::Count::get(),
+               "Number of dispatched control-flow instructions"),
+      ADD_STAT(dispCall, statistics::units::Count::get(),
+               "Number of dispatched call instructions"),
+      ADD_STAT(dispReturn, statistics::units::Count::get(),
+               "Number of dispatched return instructions"),
+      ADD_STAT(dispatchedNumSrcOperands, statistics::units::Count::get(),
+               "Histogram of the number of source operands per microop at dispatch"),
+      ADD_STAT(dispatchedNonReadyOperands, statistics::units::Count::get(),
+               "Histogram of the number of non ready source operands per microop at dispatch"),
+      ADD_STAT(dispatchedNonReadyOperandsHasDestReg, statistics::units::Count::get(),
+               "Histogram of the number of non ready source operands per microop with dest reg at dispatch"),
       ADD_STAT(iqFullEvents, statistics::units::Count::get(),
                "Number of times the IQ has become full, causing a stall"),
       ADD_STAT(lsqFullEvents, statistics::units::Count::get(),
@@ -296,6 +308,19 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     unsigned totalIQEntries = 0;
     for (const auto &iq : params.instQueues)
         totalIQEntries += iq->numEntries;
+
+    dispatchedNumSrcOperands
+        .init(0, 8, 1)
+        .flags(statistics::pdf);
+
+    dispatchedNonReadyOperands
+        .init(0, 8, 1)
+        .flags(statistics::pdf);
+
+    dispatchedNonReadyOperandsHasDestReg
+        .init(0, 8, 1)
+        .flags(statistics::pdf);
+
 
     wakeupInstructionsHistogram
         .init(0, totalIQEntries, 1)
@@ -1235,6 +1260,18 @@ IEW::dispatchInsts(ThreadID tid)
         toRename->iewInfo[tid].dispatched++;
 
         ++iewStats.dispatchedInsts;
+        if(inst->isControl()){
+            ++iewStats.dispControl;
+        } else if(inst->isCall()){
+            ++iewStats.dispCall;
+        } else if(inst->isReturn()){
+            ++iewStats.dispReturn;
+        }
+        iewStats.dispatchedNumSrcOperands.sample(inst->numSrcs());
+        iewStats.dispatchedNonReadyOperands.sample(inst->numSrcs()-inst->readyRegs);
+        if(inst->numDests()){
+            iewStats.dispatchedNonReadyOperandsHasDestReg.sample(inst->numSrcs()-inst->readyRegs);
+        }
 
         inst->dispatchTick = curTick() - inst->fetchTick;
 
