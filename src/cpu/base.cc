@@ -1064,7 +1064,11 @@ BaseCPU::CommitCPUStats::CommitCPUStats(statistics::Group *parent,
       ADD_STAT(functionCalls, statistics::units::Count::get(),
                "Number of function calls committed"),
       ADD_STAT(numCallsReturns, statistics::units::Count::get(),
-               "Number of function calls and returns committed")
+               "Number of function calls and returns committed"),
+      ADD_STAT(numStores, statistics::units::Count::get(),
+               "Number of stores ISA instructions committed"),
+      ADD_STAT(numControl, statistics::units::Count::get(),
+               "Number of control flow ISA instructions committed")
 
 {
     numInsts

@@ -894,6 +894,12 @@ class BaseCPU : public ClockedObject
 
         void updateComCtrlStats(const StaticInstPtr staticInst);
 
+        /*Number of stores ISA instructions committed */
+        statistics::Scalar numStores;
+
+        /*Number of control flow ISA instructions committed */
+        statistics::Scalar numControl;
+
     };
 
     std::vector<std::unique_ptr<FetchCPUStats>> fetchStats;

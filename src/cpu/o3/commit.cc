@@ -1360,6 +1360,10 @@ Commit::updateComInstStats(const DynInstPtr &inst)
     // double count Microops as insts.
     if (!inst->isMicroop() || inst->isLastMicroop()) {
         cpu->commitStats[tid]->numInsts++;
+        if (inst->isStore())
+            cpu->commitStats[tid]->numStores++;
+        if (inst->isControl())
+            cpu->commitStats[tid]->numControl++;
         cpu->baseStats.numInsts++;
         if (in_user_mode) {
             cpu->commitStats[tid]->numUserInsts++;
