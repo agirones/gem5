@@ -54,14 +54,29 @@ parser.add_argument(
     help="Which simpoint to run. Required if simrun mode",
 )
 
-args = parser.parse_args()
+parser.add_argument(
+    "--cpu-width",
+    type=int,
+    required=False,
+    help="Width for the backend of the processor: decode, rename, dispatch, issue, wb and commit."
+)
 
+parser.add_argument(
+    "--run-base-dir", type=str,
+    default="_default_run_dir_runs",
+    help="Base directory for simulation runs (e.g., 'my_sims' or 'data/runs')"
+)
+
+args = parser.parse_args()
 
 benchmark = ALL_BENCHMARKS[args.benchmark_num]
 
 script_dir = os.path.dirname(__file__)
 root = os.path.abspath(f"{script_dir}/../..")
-print(root)
+
+if args.run_base_dir == "_default_run_dir_runs":
+    args.run_base_dir = f"{root}/runs/output"
+
 checkpoints = f"{root}/runs/legacy-checkpoints"
 simpoints_dir = f"/cluster/projects/mast/simpoints/simpoints"
 simpoint_cpt_dir = "/cluster/projects/mast/checkpoints/simpoint-checkpoints"
@@ -175,7 +190,7 @@ def parseSimpoints(benchmark, interval_length, warmup_length, testsys):
 
 
 def get_sim_work_dir():
-    run_dir = f"{root}/runs/{benchmark.name}"
+    run_dir = f"{args.run_base_dir}/width{args.cpu_width}/{benchmark.name}"
     dirs = [x for x in os.listdir(run_dir) if x.startswith(f"cpt.simpoint_{args.simpoint_num}")]
     assert len(dirs) == 1, f"Ensuring there is only one matching work_dir, matching dirs {dirs}"
     return dirs[0]
@@ -243,9 +258,9 @@ test_sys.cpu_clk_domain = SrcClockDomain(
 
 test_sys.workload.object_file = binary(kernel)
 if not args.mode == "simrun":
-    work_dir = f"{root}/runs/{benchmark.name}"
+    work_dir = f"{args.run_base_dir}/width{args.cpu_width}/{benchmark.name}"
 else:
-    work_dir = f"{root}/runs/{benchmark.name}/{get_sim_work_dir()}"
+    work_dir = f"{args.run_base_dir}/width{args.cpu_width}/{benchmark.name}/{get_sim_work_dir()}"
 
 
 with open(f"{work_dir}/readfile.script", "w") as file:
