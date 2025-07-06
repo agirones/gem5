@@ -446,9 +446,27 @@ class IEW
         /** Histogram of the number of source operands per microop at dispatch. */
         statistics::Distribution dispatchedNumSrcOperands;
         /** Histogram of the number of non ready source operands per microop at dispatch. */
-        statistics::Distribution dispatchedNonReadyOperands;
+        statistics::Vector dispatchedNonReadyOperands;
         /** Histogram of the number of ready source operands per microop with dest reg at dispatch. */
         statistics::Distribution dispatchedNonReadyOperandsHasDestReg;
+        /** Number of macro-ops dispatched. */
+        statistics::Scalar dispatchedMacroops;
+        /** Number of micro-ops dispatched. */
+        statistics::Scalar dispatchedMicroops;
+        /** Histogram of source operands for dispatched macro-ops. */
+        statistics::Distribution dispatchedMacroopSrcOperands;
+        /** Histogram of destination operands for dispatched macro-ops. */
+        statistics::Distribution dispatchedMacroopDestOperands;
+        /** Histogram of source operands for dispatched micro-ops. */
+        statistics::Distribution dispatchedMicroopSrcOperands;
+        /** Histogram of destination operands for dispatched micro-ops. */
+        statistics::Distribution dispatchedMicroopDestOperands;
+        /** Count of each physical register class used as a source operand at dispatch. */
+        statistics::Vector dispatchedSrcRegsByClass;
+        /** Count of each physical register class used as a non ready source operand at dispatch. */
+        statistics::Vector dispatchedNonReadySrcRegsByClass;
+        /** Count of each physical register class used as a destination operand at dispatch. */
+        statistics::Vector dispatchedDestRegsByClass;
         /** Stat for number of times the IQ becomes full. */
         statistics::Scalar iqFullEvents;
         /** Stat for number of times the LSQ becomes full. */

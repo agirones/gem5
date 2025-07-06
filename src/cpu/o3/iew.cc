@@ -183,6 +183,24 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
              "Histogram of the number of non ready source operands per microop at dispatch"),
     ADD_STAT(dispatchedNonReadyOperandsHasDestReg, statistics::units::Count::get(),
              "Histogram of the number of non ready source operands per microop with dest reg at dispatch"),
+    ADD_STAT(dispatchedMacroops, statistics::units::Count::get(),
+             "Number of macro-ops dispatched"),
+    ADD_STAT(dispatchedMicroops, statistics::units::Count::get(),
+             "Number of micro-ops dispatched"),
+    ADD_STAT(dispatchedMacroopSrcOperands, statistics::units::Count::get(),
+             "Histogram of source operands for dispatched macro-ops"),
+    ADD_STAT(dispatchedMacroopDestOperands, statistics::units::Count::get(),
+             "Histogram of destination operands for dispatched macro-ops"),
+    ADD_STAT(dispatchedMicroopSrcOperands, statistics::units::Count::get(),
+             "Histogram of source operands for dispatched micro-ops"),
+    ADD_STAT(dispatchedMicroopDestOperands, statistics::units::Count::get(),
+             "Histogram of destination operands for dispatched micro-ops"),
+    ADD_STAT(dispatchedSrcRegsByClass, statistics::units::Count::get(),
+         "Count of each physical register class used as a source operand at dispatch"),
+    ADD_STAT(dispatchedNonReadySrcRegsByClass, statistics::units::Count::get(),
+         "Count of each physical register class used as a non ready source operand at dispatch"),
+    ADD_STAT(dispatchedDestRegsByClass, statistics::units::Count::get(),
+         "Count of each physical register class used as a destination operand at dispatch"),
     ADD_STAT(iqFullEvents, statistics::units::Count::get(),
              "Number of times the IQ has become full, causing a stall"),
     ADD_STAT(lsqFullEvents, statistics::units::Count::get(),
@@ -297,12 +315,77 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
         .flags(statistics::pdf);
     
     dispatchedNonReadyOperands
-        .init(0,8,1)
-        .flags(statistics::pdf);
+        .init(4)
+        .subname(0, "0")
+        .subname(1, "1")
+        .subname(2, "2")
+        .subname(3, "3 or more")
+        .flags(statistics::total | statistics::pdf);
 
     dispatchedNonReadyOperandsHasDestReg
         .init(0,8,1)
         .flags(statistics::pdf);
+
+    dispatchedMacroops
+        .flags(statistics::total);
+
+    dispatchedMicroops
+        .flags(statistics::total);
+
+    dispatchedMacroopSrcOperands
+        .init(0, 16, 1)
+        .flags(statistics::pdf);
+
+    dispatchedMacroopDestOperands
+        .init(0, 8, 1)
+        .flags(statistics::pdf);
+
+    dispatchedMicroopSrcOperands
+        .init(0, 16, 1)
+        .flags(statistics::pdf);
+
+    dispatchedMicroopDestOperands
+        .init(0, 8, 1)
+        .flags(statistics::pdf);
+
+    dispatchedSrcRegsByClass
+        .init(9)
+        .subname(0, "IntRegClass")
+        .subname(1, "FloatRegClass")
+        .subname(2, "VecRegClass")
+        .subname(3, "VecElemClass")
+        .subname(4, "VecPredRegClass")
+        .subname(5, "MatRegClass")
+        .subname(6, "CCRegClass")
+        .subname(7, "MiscRegClass")
+        .subname(8, "InvalidRegClass")
+        .flags(statistics::total | statistics::pdf);
+
+    dispatchedNonReadySrcRegsByClass
+        .init(9)
+        .subname(0, "IntRegClass")
+        .subname(1, "FloatRegClass")
+        .subname(2, "VecRegClass")
+        .subname(3, "VecElemClass")
+        .subname(4, "VecPredRegClass")
+        .subname(5, "MatRegClass")
+        .subname(6, "CCRegClass")
+        .subname(7, "MiscRegClass")
+        .subname(8, "InvalidRegClass")
+        .flags(statistics::total | statistics::pdf);
+
+    dispatchedDestRegsByClass
+        .init(9)
+        .subname(0, "IntRegClass")
+        .subname(1, "FloatRegClass")
+        .subname(2, "VecRegClass")
+        .subname(3, "VecElemClass")
+        .subname(4, "VecPredRegClass")
+        .subname(5, "MatRegClass")
+        .subname(6, "CCRegClass")
+        .subname(7, "MiscRegClass")
+        .subname(8, "InvalidRegClass")
+        .flags(statistics::total | statistics::pdf);
 
     wakeupInstructionsHistogram
         .init(0,params.numIQEntries,1)
@@ -1247,9 +1330,52 @@ IEW::dispatchInsts(ThreadID tid)
             ++iewStats.dispReturn;
         }
         iewStats.dispatchedNumSrcOperands.sample(inst->numSrcs());
-        iewStats.dispatchedNonReadyOperands.sample(inst->numSrcs()-inst->readyRegs);
+        int numNonReadyOperands = inst->numSrcs()-inst->readyRegs;
+        if (numNonReadyOperands > 2){
+            iewStats.dispatchedNonReadyOperands[3]++;
+        } else {
+            iewStats.dispatchedNonReadyOperands[numNonReadyOperands]++;
+        }
+
         if(inst->numDests()){
             iewStats.dispatchedNonReadyOperandsHasDestReg.sample(inst->numSrcs()-inst->readyRegs);
+        }
+        if (inst->staticInst->isMacroop()) {
+            iewStats.dispatchedMacroops++;
+            iewStats.dispatchedMacroopSrcOperands.sample(inst->numSrcs());
+            iewStats.dispatchedMacroopDestOperands.sample(inst->numDests());
+        } else if (inst->staticInst->isMicroop()) {
+            iewStats.dispatchedMicroops++;
+            iewStats.dispatchedMicroopSrcOperands.sample(inst->numSrcs());
+            iewStats.dispatchedMicroopDestOperands.sample(inst->numDests());
+        }
+
+        for (int i = 0; i < inst->numSrcRegs(); ++i) {
+            PhysRegIdPtr phys_reg = inst->renamedSrcIdx(i);
+            RegClassType type = phys_reg->classValue();
+
+            if (type == InvalidRegClass){
+                iewStats.dispatchedSrcRegsByClass[8]++;
+                if (!inst->readySrcIdx(i)){
+                    iewStats.dispatchedNonReadySrcRegsByClass[8]++;
+                }
+            } else {
+                iewStats.dispatchedSrcRegsByClass[type]++;
+                if (!inst->readySrcIdx(i)){
+                    iewStats.dispatchedNonReadySrcRegsByClass[type]++;
+                }
+            }
+        }
+
+        for (int i = 0; i < inst->numDestRegs(); ++i) {
+            PhysRegIdPtr phys_reg = inst->renamedDestIdx(i);
+            RegClassType type = phys_reg->classValue();
+
+            if (type == InvalidRegClass){
+                iewStats.dispatchedDestRegsByClass[8]++;
+            } else {
+                iewStats.dispatchedDestRegsByClass[type]++;
+            }
         }
 
 #if TRACING_ON
