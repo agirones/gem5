@@ -43,6 +43,9 @@
 
 #include <queue>
 #include <set>
+#include <string>
+#include <vector>
+#include <map>
 
 #include "base/statistics.hh"
 #include "cpu/o3/comm.hh"
@@ -417,8 +420,19 @@ class IEW
 
     struct IEWStats : public statistics::Group
     {
+        std::map<std::string, int> mnemonicToIndex;
+        std::vector<std::string> indexToMnemonic;
+        std::map<std::string, int> macroMnemonicToIndex;
+        std::vector<std::string> indexToMacroMnemonic;
+
         IEWStats(CPU *cpu, const BaseO3CPUParams &params);
 
+        void initializeMnemonicMapping();
+        void recordMnemonicOccurrence(const std::string& mnemonic);
+        void recordMnemonicWith3OrPlusOccurrence(const std::string& mnemonic);
+        void recordMacroopMnemonicWith3OrPlusOccurrence(const std::string& mnemonic);
+        void recordMnemonicNonReadyNonCCRegs3Plus(const std::string& mnemonic);
+        void recordMacroopMnemonicNonReadyNonCCRegs3Plus(const std::string& mnemonic);
         /** Stat for total number of idle cycles. */
         statistics::Scalar idleCycles;
         /** Stat for total number of squashing cycles. */
@@ -505,7 +519,7 @@ class IEW
         /** Average number of woken instructions per writeback. */
         statistics::Formula wbFanout;
         /** Histogram of the number of instructions each instruction wakes up. */
-        statistics::Distribution wakeupInstructionsHistogram;
+        statistics::Vector wakeupInstructionsHistogram;
         /** Histogram of the number of produced values by exec each cycle. */
         statistics::Distribution producerInstPerCycle;
         /** Histogram of instructions waking up 1 or more instructions per cycle. */
@@ -560,6 +574,30 @@ class IEW
         statistics::Scalar execNoDestRegsStore;
         /**Stat for number of control instructions that have executed and do not have destination registers*/
         statistics::Scalar execNoDestRegsControl;
+        /** Distribution of instructions by number of woken instructions (0, 1, 2, 3+). */
+        statistics::Vector producerInstWakeupCounts;
+        /** Distribution of source register classes for instructions dispatched with 3 or more non-ready source operands. */
+        statistics::Vector srcRegClassDispatchedWith3PlusNonReady;
+        /** Counts of dispatched instructions based on StaticInstFlags. */
+        statistics::Vector dispatchedInstFlags;
+        /** Counts of dispatched instructions with three or more non ready source operands based on StaticInstFlags. */
+        statistics::Vector dispatchedInstFlagsWith3PlusNonReady;
+        /** Counts of dispatched instructions by mnemonic. */
+        statistics::Vector dispatchedMnemonicCounts;
+        /** Counts of dispatched instructions with three or more non ready source opernads by mnemonic. */
+        statistics::Vector dispatchedMnemonicWith3PlusNonReadyCounts;
+        /** Counts of dispatched macroops instructions with three or more non ready source opernads by mnemonic. */
+        statistics::Vector dispatchedMacroopMnemonicWith3PlusNonReadyCounts;
+        /** Number of instructions with 3 or more non-ready, non-CCRegClass source operands. */
+        statistics::Scalar numNonReadyNonCCRegs3Plus;
+        /** Mnenomics of microop instructions with 3 or more non-ready, non-CCRegClass source operands. */
+        statistics::Vector mnenomicsNonReadyNonCCRegs3Plus;
+        /** Mnenomics of macroop instructions with 3 or more non-ready, non-CCRegClass source operands. */
+        statistics::Vector macroopMnenomicsNonReadyNonCCRegs3Plus;
+        /* Number of unique instructions that woke up an instruction. */
+        statistics::Vector numUniqueWakers;
+        /* Total number of comparisons in the IQ during wakeup in the baseline. */
+        statistics::Scalar wakeupBaselineComparisons;
     } iewStats;
 };
 

@@ -1168,6 +1168,24 @@ class DynInst : public ExecContext, public RefCounted
         cpu->setReg(reg, val, threadNumber);
         setResult(reg->regClass(), val);
     }
+
+  private:
+    std::set<unsigned long long> seen_deps;
+  public:
+    /* Counter for the number of unique instructions that have woken up this instruction. */
+    unsigned int numUniqueWakers = 0;
+
+    void 
+    updateUniqueDependencies(const DynInstPtr &dep_inst) { 
+        // Check if we've already processed this specific dep_inst
+        if (seen_deps.find(dep_inst->seqNum) == seen_deps.end()) {
+            // This is the first time we've seen this dep_inst in this loop
+            seen_deps.insert(dep_inst->seqNum);
+            // Increment the counter on the dependent instruction
+            numUniqueWakers++;
+        }
+    }
+
 };
 
 } // namespace o3

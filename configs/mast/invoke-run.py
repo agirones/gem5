@@ -102,6 +102,10 @@ for i in range(len(cpts)):
     setup_cpt_dir(cpt)
     subprocess.run([f"{root}/build/X86/gem5.opt",
 #                    "--debug-flags=O3PipeView",
+#                    "--debug-flags=IEW",
+#                    "--debug-flags=IQ",
+#                    "--debug-flags=IQDEP",
+#                    "--debug-flags=RegIndex",
 #                    "--debug-file=trace.out",
 #                    "--debug-start=1342141375473",
 #                    "--debug-end=1464957618957",

@@ -57,16 +57,18 @@
 #include "debug/DispatchMicroop.hh"
 #include "debug/Drain.hh"
 #include "debug/IEW.hh"
+#include "debug/RegIndex.hh"
 #include "debug/O3PipeView.hh"
 #include "debug/WakeUp.hh"
 #include "params/BaseO3CPU.hh"
 #include "enums/OpClass.hh"
-
+#include "enums/StaticInstFlags.hh"
 
 #include <iostream>
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <set>
 
 namespace gem5
 {
@@ -284,7 +286,31 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     ADD_STAT(execNoDestRegsStore, statistics::units::Count::get(),
              "Stat for number of stores that have executed and do not have destination registers"),
     ADD_STAT(execNoDestRegsControl, statistics::units::Count::get(),
-             "Stat for number of control instructions that have executed and do not have destination registers")
+             "Stat for number of control instructions that have executed and do not have destination registers"),
+    ADD_STAT(producerInstWakeupCounts, statistics::units::Count::get(),
+             "Distribution of instructions by number of woken instructions (0, 1, 2, 3+)"),
+    ADD_STAT(srcRegClassDispatchedWith3PlusNonReady, statistics::units::Count::get(),
+             "Distribution of source register classes for instructions dispatched with 3 or more non-ready source operands"),
+    ADD_STAT(dispatchedInstFlags, statistics::units::Count::get(),
+             "Counts of dispatched instructions based on StaticInstFlags"),
+    ADD_STAT(dispatchedInstFlagsWith3PlusNonReady, statistics::units::Count::get(),
+             "Counts of dispatched instructions based on StaticInstFlags"),
+    ADD_STAT(dispatchedMnemonicCounts, statistics::units::Count::get(),
+             "Counts of dispatched instructions by mnemonic"),
+    ADD_STAT(dispatchedMnemonicWith3PlusNonReadyCounts, statistics::units::Count::get(),
+             "Counts of dispatched instructions with three or more non ready source opernads by mnemonic"),
+    ADD_STAT(dispatchedMacroopMnemonicWith3PlusNonReadyCounts, statistics::units::Count::get(),
+             "Counts of dispatched macroops instructions with three or more non ready source opernads by mnemonic"),
+    ADD_STAT(numNonReadyNonCCRegs3Plus, statistics::units::Count::get(),
+             "Number of instructions with 3 or more non-ready, non-CCRegClass source operands"),
+    ADD_STAT(mnenomicsNonReadyNonCCRegs3Plus, statistics::units::Count::get(),
+             "Mnenomics of microop instructions with 3 or more non-ready, non-CCRegClass source operands"),
+    ADD_STAT(macroopMnenomicsNonReadyNonCCRegs3Plus, statistics::units::Count::get(),
+             "Mnenomics of macroop instructions with 3 or more non-ready, non-CCRegClass source operands"),
+    ADD_STAT(numUniqueWakers, statistics::units::Count::get(),
+             "Number of unique instructions that woke up an instruction"),
+    ADD_STAT(wakeupBaselineComparisons, statistics::units::Count::get(),
+             "Total number of comparisons in the IQ during wakeup in the baseline")
 {
     instsToCommit
         .init(cpu->numThreads)
@@ -319,7 +345,7 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
         .subname(0, "0")
         .subname(1, "1")
         .subname(2, "2")
-        .subname(3, "3 or more")
+        .subname(3, "3_or_more")
         .flags(statistics::total | statistics::pdf);
 
     dispatchedNonReadyOperandsHasDestReg
@@ -388,8 +414,14 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
         .flags(statistics::total | statistics::pdf);
 
     wakeupInstructionsHistogram
-        .init(0,params.numIQEntries,1)
-        .flags(statistics::pdf);
+        .init(6)
+        .subname(0, "0")
+        .subname(1, "1")
+        .subname(2, "2")
+        .subname(3, "3_or_more")
+        .subname(4, "0_store")
+        .subname(5, "0_branch")
+        .flags(statistics::total | statistics::pdf);
 
     producerInstPerCycle
         .init(0,params.wbWidth,1)
@@ -429,6 +461,96 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     for (int i=0; i < Num_OpClasses; ++i) {
         noWakeupInstType.subname(i, enums::OpClassStrings[i]);
     }
+
+    producerInstWakeupCounts
+        .init(4)
+        .subname(0, "0")
+        .subname(1, "1")
+        .subname(2, "2")
+        .subname(3, "3_or_more")
+        .flags(statistics::total | statistics::pdf);
+
+    srcRegClassDispatchedWith3PlusNonReady
+        .init(9)
+        .subname(0, "IntRegClass")
+        .subname(1, "FloatRegClass")
+        .subname(2, "VecRegClass")
+        .subname(3, "VecElemClass")
+        .subname(4, "VecPredRegClass")
+        .subname(5, "MatRegClass")
+        .subname(6, "CCRegClass")
+        .subname(7, "MiscRegClass")
+        .subname(8, "InvalidRegClass")
+        .flags(statistics::total | statistics::pdf);
+
+    dispatchedInstFlags
+        .init(StaticInstFlags::Num_Flags)
+        .flags(statistics::total | statistics::pdf);
+    for (int i = 0; i < StaticInstFlags::Num_Flags; ++i) {
+        dispatchedInstFlags.subname(i, StaticInstFlags::FlagsStrings[i]);
+    }
+
+    dispatchedInstFlagsWith3PlusNonReady
+        .init(StaticInstFlags::Num_Flags)
+        .flags(statistics::total | statistics::pdf);
+    for (int i = 0; i < StaticInstFlags::Num_Flags; ++i) {
+        dispatchedInstFlagsWith3PlusNonReady.subname(i, StaticInstFlags::FlagsStrings[i]);
+    }
+
+    initializeMnemonicMapping();
+
+    dispatchedMnemonicCounts
+        .init(indexToMnemonic.size())
+        .flags(statistics::total | statistics::pdf);
+
+    for (size_t i = 0; i < indexToMnemonic.size(); ++i) {
+        dispatchedMnemonicCounts.subname(i, indexToMnemonic[i]);
+    }
+
+    dispatchedMnemonicWith3PlusNonReadyCounts
+        .init(indexToMnemonic.size())
+        .flags(statistics::total | statistics::pdf);
+
+    for (size_t i = 0; i < indexToMnemonic.size(); ++i) {
+        dispatchedMnemonicWith3PlusNonReadyCounts.subname(i, indexToMnemonic[i]);
+    }
+
+    dispatchedMacroopMnemonicWith3PlusNonReadyCounts
+        .init(indexToMacroMnemonic.size())
+        .flags(statistics::total | statistics::pdf);
+
+    for (size_t i = 0; i < indexToMacroMnemonic.size(); ++i) {
+        dispatchedMacroopMnemonicWith3PlusNonReadyCounts.subname(i, indexToMacroMnemonic[i]);
+    }
+
+    numNonReadyNonCCRegs3Plus
+        .flags(statistics::total);
+
+    mnenomicsNonReadyNonCCRegs3Plus
+        .init(indexToMnemonic.size())
+        .flags(statistics::total | statistics::pdf);
+
+    for (size_t i = 0; i < indexToMnemonic.size(); ++i) {
+        mnenomicsNonReadyNonCCRegs3Plus.subname(i, indexToMnemonic[i]);
+    }
+
+    macroopMnenomicsNonReadyNonCCRegs3Plus
+        .init(indexToMacroMnemonic.size())
+        .flags(statistics::total | statistics::pdf);
+    for (size_t i = 0; i < indexToMacroMnemonic.size(); ++i) {
+        macroopMnenomicsNonReadyNonCCRegs3Plus.subname(i, indexToMacroMnemonic[i]);
+    }
+
+    numUniqueWakers
+        .init(5)
+        .subname(0, "0")
+        .subname(1, "1")
+        .subname(2, "2")
+        .subname(3, "3_or_more")
+        .flags(statistics::total | statistics::pdf);
+
+    wakeupBaselineComparisons
+        .flags(statistics::total);
 }
 
 IEW::IEWStats::ExecutedInstStats::ExecutedInstStats(CPU *cpu)
@@ -1082,63 +1204,6 @@ IEW::dispatchInsts(ThreadID tid)
         // Make sure there's a valid instruction there.
         assert(inst);
 
-        if (gem5::debug::DispatchMicroop) {
-            StaticInstPtr macroop_inst = inst->macroop;
-            std::string macroop_info;
-            if (macroop_inst) {
-                std::ostringstream numSrcRegsStream, numDestRegsStream;
-                numSrcRegsStream << macroop_inst->numSrcRegs();
-                numDestRegsStream << macroop_inst->numDestRegs();
-                macroop_info = "Macro-op: Name = " + macroop_inst->getName() +
-                               ", numSrcRegs = " + numSrcRegsStream.str() +
-                               " numDestRegs = " + numDestRegsStream.str();
-            } else {
-                macroop_info = "Macro-op: Unknown";
-            }
-
-            std::string dest_regs;
-            for (int i = 0; i < inst->numDestRegs(); ++i) {
-                dest_regs += inst->flattenedDestIdx(i).className();
-                if (i < inst->numDestRegs() - 1) {
-                    dest_regs += ", ";
-                }
-            }
-
-            std::string src_regs;
-            for (int i = 0; i < inst->numSrcRegs(); ++i) {
-                src_regs += inst->renamedSrcIdx(i)->className();
-                if (i < inst->numSrcRegs() - 1) {
-                    src_regs += ", ";
-                }
-            }
-
-            gem5::cp::Format fmt;
-            std::ostringstream os_name;
-            gem5::cp::formatString(os_name, inst->staticInst->getName(), fmt);
-            std::string name_str = os_name.str();
-
-            std::ostringstream os_dest;
-            gem5::cp::formatString(os_dest, dest_regs, fmt);
-            std::string dest_str = os_dest.str();
-
-            std::ostringstream os_src;
-            gem5::cp::formatString(os_src, src_regs, fmt);
-            std::string src_str = os_src.str();
-            
-
-            DPRINTF(DispatchMicroop,
-                    "-------------------------------------------------------------------\n"
-                    "[tid:%i] Dispatching Micro-op [sn:%lli] of %s\n"
-                    "  Name: %-15s Dest Regs: [%-10s] Src Regs: [%-10s] OpClass: %s\n",
-                    tid,
-                    inst->seqNum,
-                    macroop_info,
-                    name_str.c_str(),
-                    dest_str.c_str(),
-                    src_str.c_str(),
-                    gem5::enums::OpClassStrings[inst->opClass()]);
-        }
-
         DPRINTF(IEW, "[tid:%i] Issue: Adding PC %s [sn:%lli] [tid:%i] to "
                 "IQ.\n",
                 tid, inst->pcState(), inst->seqNum, inst->threadNumber);
@@ -1330,9 +1395,121 @@ IEW::dispatchInsts(ThreadID tid)
             ++iewStats.dispReturn;
         }
         iewStats.dispatchedNumSrcOperands.sample(inst->numSrcs());
-        int numNonReadyOperands = inst->numSrcs()-inst->readyRegs;
+
+        const std::bitset<StaticInstFlags::Num_Flags>& flags = inst->staticInst->flags;
+        for (int i = 0; i < StaticInstFlags::Num_Flags; ++i) {
+            if (flags[i]) {
+                iewStats.dispatchedInstFlags[i]++;
+            }
+        }
+
+        iewStats.recordMnemonicOccurrence(inst->staticInst->getName());
+
+        for(int i = 0; i < inst->numSrcs(); i++){
+            PhysRegIdPtr phys_reg = inst->renamedSrcIdx(i);
+            RegClassType type = phys_reg->classValue();
+            DPRINTF(RegIndex, "Source Register type for source %d: %d\n",
+                    i, type);
+            DPRINTF(RegIndex, "Source Physical register index for source %d: %d\n",
+                    i, phys_reg->index());
+            DPRINTF(RegIndex, "Source Physical register flaten index for source %d: %u\n",
+                    i, phys_reg->flatIndex());
+        }
+
+        for(int i = 0; i < inst->numDests(); i++){
+            PhysRegIdPtr phys_reg = inst->renamedDestIdx(i);
+            RegClassType type = phys_reg->classValue();
+            DPRINTF(RegIndex, "Dest Register type for dest %d: %d\n",
+                    i, type);
+            DPRINTF(RegIndex, "Dest Physical register index for dest %d: %d\n",
+                    i, phys_reg->index());
+            DPRINTF(RegIndex, "Dest Physical register flaten index for source %d: %u\n",
+                    i, phys_reg->flatIndex());
+        }
+
+//        int nonCCSourceOperands = 0;
+//        for (int i = 0; i < inst->numSrcs(); ++i) {
+//            PhysRegIdPtr phys_reg = inst->renamedSrcIdx(i);
+//            if (phys_reg && phys_reg->classValue() != RegClassType::CCRegClass &&
+//                phys_reg->classValue() != RegClassType::InvalidRegClass &&
+//                phys_reg->classValue() != RegClassType::MiscRegClass) {
+//                nonCCSourceOperands++;
+//            }
+//        }
+//
+//        int numSourceOperands = nonCCSourceOperands;
+//
+//        if (numSourceOperands > 2){
+//            printf("Instruction name: %s\n", inst->staticInst->getName().c_str());
+//            if (inst->macroop) {
+//                printf("Macro-op name: %s\n", inst->macroop->getName().c_str());
+//            }
+//
+//            inst->dump();
+//
+//            for(int i = 0; i < inst->numSrcs(); i++){
+//                PhysRegIdPtr phys_reg = inst->renamedSrcIdx(i);
+//                if (phys_reg && phys_reg->classValue() != RegClassType::CCRegClass &&
+//                    phys_reg->classValue() != RegClassType::InvalidRegClass &&
+//                    phys_reg->classValue() != RegClassType::MiscRegClass) {
+//                    RegClassType type = phys_reg->classValue();
+//                    printf("Source Register type for source %d: %d\n", i, type);
+//                    printf("Source Physical register index for source %d: %d\n", i, phys_reg->index());
+//                }
+//            }
+//
+//            for(int i = 0; i < inst->numDests(); i++){
+//                PhysRegIdPtr phys_reg = inst->renamedDestIdx(i);
+//                if (phys_reg && phys_reg->classValue() != RegClassType::CCRegClass &&
+//                    phys_reg->classValue() != RegClassType::InvalidRegClass &&
+//                    phys_reg->classValue() != RegClassType::MiscRegClass) {
+//                    RegClassType type = phys_reg->classValue();
+//                    printf("Dest Register type for dest %d: %d\n", i, type);
+//                    printf("Dest Physical register index for dest %d: %d\n", i, phys_reg->index());
+//                }
+//            }
+//
+//            assert(0);
+//        }
+
+        int numNonReadyOperands = inst->numSrcs() - inst->readyRegs;
+
         if (numNonReadyOperands > 2){
+            iewStats.recordMnemonicWith3OrPlusOccurrence(inst->staticInst->getName());
+            iewStats.recordMacroopMnemonicWith3OrPlusOccurrence(inst->macroop->getName());
             iewStats.dispatchedNonReadyOperands[3]++;
+
+            int nonCCRegsCount = 0;
+
+            for (int i = 0; i < inst->numSrcRegs(); ++i) {
+                PhysRegIdPtr phys_reg = inst->renamedSrcIdx(i);
+                RegClassType type = phys_reg->classValue();
+
+                if (!inst->readySrcIdx(i)){
+                    if (type != CCRegClass) {
+                        nonCCRegsCount++;
+                    }
+                    if (type == InvalidRegClass){
+                        iewStats.srcRegClassDispatchedWith3PlusNonReady[8]++;
+                    } else {
+                        iewStats.srcRegClassDispatchedWith3PlusNonReady[type]++;
+                    }
+                }
+            }
+
+            if (nonCCRegsCount >= 3) {
+                iewStats.numNonReadyNonCCRegs3Plus++;
+                iewStats.recordMacroopMnemonicNonReadyNonCCRegs3Plus(inst->macroop->getName());
+                iewStats.recordMnemonicNonReadyNonCCRegs3Plus(inst->staticInst->getName());
+            }
+
+            const std::bitset<StaticInstFlags::Num_Flags>& flags = inst->staticInst->flags;
+            for (int i = 0; i < StaticInstFlags::Num_Flags; ++i) {
+                if (flags[i]) {
+                    iewStats.dispatchedInstFlagsWith3PlusNonReady[i]++;
+                }
+            }
+
         } else {
             iewStats.dispatchedNonReadyOperands[numNonReadyOperands]++;
         }
@@ -1680,6 +1857,8 @@ IEW::writebackInsts()
     int twoOrMoreCount = 0;
     int threeOrMoreCount = 0;
 
+    int num_non_ready_operands_iq = instQueue.getNumNonReadyOperands();
+
     for (int inst_num = 0; inst_num < wbWidth &&
              toCommit->insts[inst_num]; inst_num++) {
         DynInstPtr inst = toCommit->insts[inst_num];
@@ -1700,6 +1879,7 @@ IEW::writebackInsts()
         // when it's ready to execute the strictly ordered load.
         if (!inst->isSquashed() && inst->isExecuted() &&
                 inst->getFault() == NoFault) {
+            iewStats.wakeupBaselineComparisons += (num_non_ready_operands_iq * inst->numDestRegs());
             int dependents = instQueue.wakeDependents(inst);
 
             for (int i = 0; i < inst->numDestRegs(); i++) {
@@ -1719,6 +1899,11 @@ IEW::writebackInsts()
                 iewStats.wakeupHasDestRegsHist.sample(dependents);
                 iewStats.iqOccupancyHist.sample(instQueue.getCount(inst->threadNumber));
                 iewStats.nonReadyInIQHist.sample(instQueue.getNumNonReadyOperands());
+                if(dependents > 2){
+                    iewStats.producerInstWakeupCounts[3]++;
+                } else {
+                    iewStats.producerInstWakeupCounts[dependents]++;
+                }
                 if(inst->isStore())
                     ++iewStats.execHasDestRegsStore;
                 if(inst->isControl())
@@ -1772,7 +1957,25 @@ IEW::writebackInsts()
                     iewStats.noWakeupUncondCtrlInst++;
             }
             iewStats.writebackCount[tid]++;
-            iewStats.wakeupInstructionsHistogram.sample(dependents);
+            if(dependents > 2){
+                iewStats.wakeupInstructionsHistogram[3]++;
+            } else if(dependents == 0){
+                if(inst->isControl()){
+                    iewStats.wakeupInstructionsHistogram[5]++;
+                } else if(inst->isStore()){
+                    iewStats.wakeupInstructionsHistogram[4]++;
+                } else {
+                    iewStats.wakeupInstructionsHistogram[0]++;
+                }
+            } else { 
+                iewStats.wakeupInstructionsHistogram[dependents]++;
+            }
+
+            if(inst->numUniqueWakers > 2){
+                iewStats.numUniqueWakers[3]++;
+            } else {
+                iewStats.numUniqueWakers[inst->numUniqueWakers]++;
+            }
         }
     }
     iewStats.producerInstPerCycle.sample(nProd);
@@ -1974,5 +2177,475 @@ IEW::checkMisprediction(const DynInstPtr& inst)
     }
 }
 
+void IEW::IEWStats::initializeMnemonicMapping()
+{
+    std::vector<std::string> uniqueMnemonics = {
+        "adc",
+        "add",
+        "addfp",
+        "addi",
+        "and",
+        "andi",
+        "br",
+        "cda",
+        "chks",
+        "CPUID",
+        "cvtf2f",
+        "cvtf2i",
+        "cvtfp80h_int",
+        "cvtfp80l_int",
+        "cvti2f",
+        "cvtint_fp80",
+        "div1",
+        "div2",
+        "div2i",
+        "divq",
+        "divr",
+        "eret",
+        "fault",
+        "fwait",
+        "gem5 nop",
+        "halt",
+        "ld",
+        "ldfp",
+        "ldfp87",
+        "ldsplit",
+        "ldst",
+        "ldstl",
+        "lea",
+        "LFENCE",
+        "lfpimm",
+        "limm",
+        "maddf",
+        "maddi",
+        "mand",
+        "mandn",
+        "mavg",
+        "mcmpf2r",
+        "mcmpf2rf",
+        "mcmpi2r",
+        "mdbi",
+        "mdivf",
+        "mfence",
+        "MFENCE",
+        "mmaxf",
+        "mmaxi",
+        "mminf",
+        "mmini",
+        "mmulf",
+        "mmuli",
+        "mor",
+        "mov",
+        "mov2fp",
+        "mov2int",
+        "movfp",
+        "movi",
+        "movsign",
+        "msad",
+        "msll",
+        "mslli",
+        "msqrt",
+        "msra",
+        "msrai",
+        "msrl",
+        "msrli",
+        "msubf",
+        "msubi",
+        "mul1s",
+        "mul1u",
+        "muleh",
+        "mulel",
+        "mulfp",
+        "mxor",
+        "NOP",
+        "or",
+        "ori",
+        "pack",
+        "palignr",
+        "palignr_Pq_Qq_Ib",
+        "panic",
+        "prefetch_nta",
+        "rcri",
+        "rdattr",
+        "rdbase",
+        "rdcr",
+        "rdip",
+        "rdlimit",
+        "rdm5reg",
+        "rdsel",
+        "rdtsc",
+        "rdval",
+        "rdxftw",
+        "ret_far_Iw",
+        "rflag",
+        "rflags",
+        "rol",
+        "roli",
+        "rori",
+        "ruflag",
+        "ruflags",
+        "sbb",
+        "sext",
+        "sexti",
+        "SFENCE",
+        "shuffle",
+        "sld",
+        "sldi",
+        "sll",
+        "slli",
+        "sra",
+        "srai",
+        "srd",
+        "srdi",
+        "srl",
+        "srli",
+        "st",
+        "stfp",
+        "stsplit",
+        "stul",
+        "sub",
+        "subi",
+        "tia",
+        "unknown",
+        "unpack",
+        "warn_once",
+        "wrattr",
+        "wrbase",
+        "wrcr",
+        "wrdh",
+        "wrdl",
+        "wrflags",
+        "wrip",
+        "wripi",
+        "wrlimit",
+        "wrsel",
+        "wruflags",
+        "wrval",
+        "wrxftw",
+        "xgetbv",
+        "xor",
+        "xori",
+        "zexti",
+    };
+
+    std::sort(uniqueMnemonics.begin(), uniqueMnemonics.end());
+
+    for (int i = 0; i < uniqueMnemonics.size(); ++i) {
+        mnemonicToIndex[uniqueMnemonics[i]] = i;
+        indexToMnemonic.push_back(uniqueMnemonics[i]);
+    }
+
+    std::vector<std::string> uniqueMacroMnemonics = {
+        "addpd",
+        "addps",
+        "addsd",
+        "addss",
+        "bsf",
+        "bsr",
+        "bt",
+        "btr",
+        "bts",
+        "cld",
+        "cli",
+        "cmovb",
+        "cmovbe",
+        "cmovl",
+        "cmovle",
+        "cmovnb",
+        "cmovnbe",
+        "cmovnl",
+        "cmovnle",
+        "cmovns",
+        "cmovnz",
+        "cmovs",
+        "cmovz",
+        "cmp",
+        "cmppd",
+        "cmps",
+        "cmpsd",
+        "cmpss",
+        "cmpxchg",
+        "cmpxchg8b",
+        "comisd",
+        "comiss",
+        "div",
+        "divpd",
+        "divps",
+        "divsd",
+        "divss",
+        "idiv",
+        "imul",
+        "inc",
+        "iret",
+        "jb",
+        "jbe",
+        "jl",
+        "jle",
+        "jnb",
+        "jnbe",
+        "jnl",
+        "jnle",
+        "jnp",
+        "jns",
+        "jnz",
+        "jo",
+        "jp",
+        "js",
+        "jz",
+        "lldt",
+        "maxpd",
+        "maxsd",
+        "minsd",
+        "minss",
+        "movaps",
+        "movdqu",
+        "movhpd",
+        "movq",
+        "movs",
+        "movsd",
+        "movss",
+        "movsx",
+        "movups",
+        "movzx",
+        "mul",
+        "mulpd",
+        "mulps",
+        "mulsd",
+        "mulss",
+        "paddb",
+        "paddd",
+        "paddq",
+        "paddw",
+        "pavgb",
+        "pcmpeqb",
+        "pcmpeqd",
+        "pcmpgtb",
+        "pcmpgtd",
+        "pcmpgtw",
+        "pmaddwd",
+        "pmaxub",
+        "pminub",
+        "pmullw",
+        "pmuludq",
+        "pshufd",
+        "pslld",
+        "pslldq",
+        "psrad",
+        "psrldq",
+        "psrlq",
+        "psubb",
+        "subpd",
+        "subps",
+        "subsd",
+        "subss",
+        "test",
+        "ucomisd",
+        "ucomiss",
+        "xadd",
+        "xchg",
+        "adc",
+        "add",
+        "addpd",
+        "addps",
+        "addsd",
+        "addss",
+        "and",
+        "bsf",
+        "bsr",
+        "bt",
+        "btr",
+        "bts",
+        "cld",
+        "cli",
+        "cmovb",
+        "cmovbe",
+        "cmovl",
+        "cmovle",
+        "cmovnb",
+        "cmovnbe",
+        "cmovnl",
+        "cmovnle",
+        "cmovns",
+        "cmovnz",
+        "cmovs",
+        "cmovz",
+        "cmovs",
+        "cmovz",
+        "cmp",
+        "cmppd",
+        "cmps",
+        "cmpsd",
+        "cmpss",
+        "cmpxchg",
+        "cmpxchg8b",
+        "comisd",
+        "comiss",
+        "div",
+        "divpd",
+        "divps",
+        "divsd",
+        "divss",
+        "idiv",
+        "imul",
+        "inc",
+        "iret",
+        "jb",
+        "jbe",
+        "jl",
+        "jle",
+        "jnb",
+        "jnbe",
+        "jnl",
+        "jnle",
+        "jnp",
+        "jns",
+        "jnz",
+        "jo",
+        "jp",
+        "js",
+        "jz",
+        "lldt",
+        "maxpd",
+        "maxsd",
+        "minsd",
+        "minss",
+        "mov",
+        "movaps",
+        "movdqu",
+        "movhpd",
+        "movq",
+        "movs",
+        "movsd",
+        "movss",
+        "movsx",
+        "movups",
+        "movzx",
+        "mul",
+        "mulpd",
+        "mulps",
+        "mulsd",
+        "mulss",
+        "or",
+        "paddb",
+        "paddd",
+        "paddq",
+        "paddw",
+        "palignr",
+        "pavgb",
+        "pcmpeqb",
+        "pcmpeqd",
+        "pcmpgtb",
+        "pcmpgtd",
+        "pcmpgtw",
+        "pmaddwd",
+        "pmaxub",
+        "pminub",
+        "pmullw",
+        "pmuludq",
+        "pshufd",
+        "pslld",
+        "pslldq",
+        "psrad",
+        "psrldq",
+        "psrlq",
+        "psubb",
+        "psubd",
+        "psubq",
+        "psubw",
+        "pushf",
+        "rol",
+        "sal",
+        "sar",
+        "sbb",
+        "setb",
+        "setbe",
+        "setl",
+        "setle",
+        "setnb",
+        "setnbe",
+        "setnl",
+        "setnle",
+        "setnp",
+        "setnz",
+        "seto",
+        "setp",
+        "setz",
+        "shld",
+        "shr",
+        "shrd",
+        "shufpd",
+        "shufps",
+        "sti",
+        "stos",
+        "sub",
+        "subpd",
+        "subps",
+        "subsd",
+        "subss",
+        "test",
+        "ucomisd",
+        "ucomiss",
+        "xadd",
+        "xchg",
+        "xor",
+    };
+
+    std::sort(uniqueMacroMnemonics.begin(), uniqueMacroMnemonics.end());
+
+    for (int i = 0; i < uniqueMacroMnemonics.size(); ++i) {
+        macroMnemonicToIndex[uniqueMacroMnemonics[i]] = i;
+        indexToMacroMnemonic.push_back(uniqueMacroMnemonics[i]);
+    }
+}
+
+void IEW::IEWStats::recordMnemonicOccurrence(const std::string& mnemonic)
+{
+    auto it = mnemonicToIndex.find(mnemonic);
+    if (it != mnemonicToIndex.end()) {
+        dispatchedMnemonicCounts[it->second]++;
+    } else {
+        warn("Encountered an unrecognized mnemonic: %s. This mnemonic will not be recorded.", mnemonic);
+    }
+}
+
+void IEW::IEWStats::recordMnemonicWith3OrPlusOccurrence(const std::string& mnemonic)
+{
+    auto it = mnemonicToIndex.find(mnemonic);
+    if (it != mnemonicToIndex.end()) {
+        dispatchedMnemonicWith3PlusNonReadyCounts[it->second]++;
+    } else {
+        warn("Encountered an unrecognized mnemonic: %s. This mnemonic will not be recorded.", mnemonic);
+    }
+}
+
+void IEW::IEWStats::recordMacroopMnemonicWith3OrPlusOccurrence(const std::string& mnemonic)
+{
+    auto it = macroMnemonicToIndex.find(mnemonic);
+    if (it != macroMnemonicToIndex.end()) {
+        dispatchedMacroopMnemonicWith3PlusNonReadyCounts[it->second]++;
+    } else {
+        warn("Encountered an unrecognized mnemonic: %s. This mnemonic will not be recorded.", mnemonic);
+    }
+}
+
+void IEW::IEWStats::recordMnemonicNonReadyNonCCRegs3Plus(const std::string& mnemonic)
+{
+    auto it = mnemonicToIndex.find(mnemonic);
+    if (it != mnemonicToIndex.end()) {
+        mnenomicsNonReadyNonCCRegs3Plus[it->second]++;
+    } else {
+        warn("Encountered an unrecognized mnemonic: %s. This mnemonic will not be recorded.", mnemonic);
+    }
+}
+
+void IEW::IEWStats::recordMacroopMnemonicNonReadyNonCCRegs3Plus(const std::string& mnemonic)
+{
+    auto it = macroMnemonicToIndex.find(mnemonic);
+    if (it != macroMnemonicToIndex.end()) {
+        macroopMnenomicsNonReadyNonCCRegs3Plus[it->second]++;
+    } else {
+        warn("Encountered an unrecognized mnemonic: %s. This mnemonic will not be recorded.", mnemonic);
+    }
+}
 } // namespace o3
 } // namespace gem5

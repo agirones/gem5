@@ -119,6 +119,9 @@ class DependencyGraph
      */
     void dump();
 
+    /** Returns the number of dependents for a given index. */
+    int numDependents(RegIndex idx);
+
   private:
     /** Array of linked lists.  Each linked list is a list of all the
      *  instructions that depend upon a given register.  The actual
@@ -296,6 +299,23 @@ DependencyGraph<DynInstPtr>::dump()
         cprintf("\n");
     }
     cprintf("memAllocCounter: %i\n", memAllocCounter);
+}
+
+template <class DynInstPtr>
+int
+DependencyGraph<DynInstPtr>::numDependents(RegIndex idx)
+{
+    int count = 0;
+
+    DepEntry *current = dependGraph[idx].next;
+    
+    // Traverse the linked list until the end (NULL)
+    while (current != NULL) {
+        count++;
+        current = current->next;
+    }
+    
+    return count;
 }
 
 } // namespace o3

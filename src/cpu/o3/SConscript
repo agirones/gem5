@@ -61,6 +61,8 @@ if env['CONF']['BUILD_ISA']:
     DebugFlag('DispatchMicroop')
     DebugFlag('IEW')
     DebugFlag('IQ')
+    DebugFlag('IQDEP')
+    DebugFlag('RegIndex')
     DebugFlag('LSQ')
     DebugFlag('LSQUnit')
     DebugFlag('MemDepUnit')
