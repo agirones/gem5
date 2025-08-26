@@ -527,6 +527,9 @@ class InstructionQueue
     /** The number of physical registers in the CPU. */
     unsigned numPhysRegs;
 
+    /** The number of physical int, float and vec registers in the CPU. */
+    unsigned numPhysIntFloatVecRegs;
+
     /** Number of instructions currently in flight to FUs */
     int wbOutstanding;
 
@@ -649,6 +652,7 @@ class InstructionQueue
         statistics::Scalar intAluAccesses;
         statistics::Scalar fpAluAccesses;
         statistics::Scalar vecAluAccesses;
+        statistics::Scalar baselineComparisons;
     } iqIOStats;
 };
 

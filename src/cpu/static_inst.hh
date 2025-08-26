@@ -99,9 +99,6 @@ class StaticInst : public RefCounted, public StaticInstFlags
 
   protected:
 
-    /// Flag values for this instruction.
-    std::bitset<Num_Flags> flags;
-
     /// See opClass().
     OpClass _opClass;
 
@@ -114,6 +111,9 @@ class StaticInst : public RefCounted, public StaticInstFlags
     std::array<uint8_t, MiscRegClass + 1> _numTypedDestRegs = {};
 
   public:
+
+    /// Flag values for this instruction.
+    std::bitset<Num_Flags> flags;
 
     /// @name Register information.
     /// The sum of the different numDestRegs([type])-s equals numDestRegs().

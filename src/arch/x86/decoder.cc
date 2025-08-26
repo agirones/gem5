@@ -305,7 +305,6 @@ Decoder::doVex3Of3State(uint8_t nextByte)
         emi.legacy.op = 1;
         break;
       case 2:
-        emi.legacy.rep = 1;
         break;
       case 3:
         emi.legacy.repne = 1;

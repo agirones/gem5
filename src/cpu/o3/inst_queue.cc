@@ -63,6 +63,7 @@
 #include "cpu/reg_class.hh"
 #include "cpu/timebuf.hh"
 #include "debug/IQ.hh"
+#include "debug/IQDEP.hh"
 #include "enums/OpClass.hh"
 #include "enums/SMTQueuePolicy.hh"
 #include "params/BaseO3CPU.hh"
@@ -265,6 +266,8 @@ InstructionQueue::InstructionQueue(CPU *cpu_ptr, IEW *iew_ptr,
         params.numPhysVecPredRegs + params.numPhysMatRegs +
         params.numPhysCCRegs + reg_classes.at(MiscRegClass)->numRegs();
 
+    numPhysIntFloatVecRegs = params.numPhysIntRegs+ params.numPhysFloatRegs + params.numPhysVecRegs;
+
     //Create an entry for each physical register within the
     //dependency graph.
     dependGraph.resize(numPhysRegs);
@@ -284,6 +287,8 @@ InstructionQueue::InstructionQueue(CPU *cpu_ptr, IEW *iew_ptr,
 InstructionQueue::~InstructionQueue()
 {
     setNumNonReadyOperands(0);
+    DPRINTF(IQDEP, "There is a creation of the IQ: %u.\n",
+                    getNumNonReadyOperands());
     dependGraph.reset();
 #ifdef GEM5_DEBUG
     cprintf("Nodes traversed: %i, removed: %i\n",
@@ -471,7 +476,9 @@ InstructionQueue::IQIOStats::IQIOStats(statistics::Group *parent)
     ADD_STAT(fpAluAccesses, statistics::units::Count::get(),
              "Number of floating point alu accesses"),
     ADD_STAT(vecAluAccesses, statistics::units::Count::get(),
-             "Number of vector alu accesses")
+             "Number of vector alu accesses"),
+    ADD_STAT(baselineComparisons, statistics::units::Count::get(),
+             "Number of comparisons in a CAM-Based IQ")
 {
     using namespace statistics;
     intInstQueueReads
@@ -508,6 +515,9 @@ InstructionQueue::IQIOStats::IQIOStats(statistics::Group *parent)
         .flags(total);
 
     vecAluAccesses
+        .flags(total);
+
+    baselineComparisons
         .flags(total);
 }
 
@@ -550,6 +560,8 @@ InstructionQueue::resetState()
     retryMemInsts.clear();
     wbOutstanding = 0;
     setNumNonReadyOperands(0);
+    DPRINTF(IQDEP, "There is a reset of the IQ: %u.\n",
+                    getNumNonReadyOperands());
 }
 
 void
@@ -1139,6 +1151,11 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
 
     DPRINTF(IQ, "Waking dependents of completed instruction.\n");
 
+    DPRINTF(IQDEP, "Instruction PC %s is waking dependents.\n",
+                    completed_inst->pcState());
+    DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
+                    getNumNonReadyOperands());
+
     assert(!completed_inst->isSquashed());
 
     // Tell the memory dependence unit to wake any dependents on this
@@ -1159,12 +1176,27 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
         memDepUnit[tid].completeInst(completed_inst);
     }
 
+    std::set<unsigned long long> seen_deps;
+
     for (int dest_reg_idx = 0;
          dest_reg_idx < completed_inst->numDestRegs();
          dest_reg_idx++)
     {
         PhysRegIdPtr dest_reg =
             completed_inst->renamedDestIdx(dest_reg_idx);
+
+        for (size_t i = 0; i < numPhysIntFloatVecRegs; ++i) {
+            if (!regScoreboard[i]) {
+                int dependents = dependGraph.numDependents(i);
+                iqIOStats.baselineComparisons += dependents;
+            }
+        }
+
+        DPRINTF(IQDEP, "Instruction PC %s is waking dependents for register %i (%s).\n",
+                completed_inst->pcState(), dest_reg->index(),
+                dest_reg->className());
+        DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
+                        getNumNonReadyOperands());
 
         // Special case of uniq or control registers.  They are not
         // handled by the IQ and thus have no dependency graph entry.
@@ -1193,6 +1225,8 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
         //ready within the waiting instructions.
         DynInstPtr dep_inst = dependGraph.pop(dest_reg->flatIndex());
 
+        int8_t woken_src_regs = 0;
+
         while (dep_inst) {
             DPRINTF(IQ, "Waking up a dependent instruction, [sn:%llu] "
                     "PC %s.\n", dep_inst->seqNum, dep_inst->pcState());
@@ -1205,11 +1239,32 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
 
             addIfReady(dep_inst);
 
+            if (dest_reg->is(RegClassType::IntRegClass) ||
+                dest_reg->is(RegClassType::FloatRegClass) ||
+                dest_reg->is(RegClassType::VecRegClass)
+            ){
+                DPRINTF(IQDEP, "Instruction PC %s has src reg %i (%s) that "
+                        "is being woken up.\n",
+                        dep_inst->pcState(), dest_reg->index(),
+                        dest_reg->className());
+                DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
+                        getNumNonReadyOperands());
+                woken_src_regs++;
+                decrementNonReadyOperands();
+
+                dep_inst->updateUniqueDependencies(completed_inst);
+            }
+
             dep_inst = dependGraph.pop(dest_reg->flatIndex());
 
             ++dependents;
-            decrementNonReadyOperands();
+
         }
+
+        DPRINTF(IQDEP, "Instruction PC %s has woken %d registers in the IQ.\n",
+                        completed_inst->pcState(), woken_src_regs);
+        DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
+                        getNumNonReadyOperands());
 
         // Reset the head node now that all of its dependents have
         // been woken up.
@@ -1430,7 +1485,19 @@ InstructionQueue::doSquash(ThreadID tid)
                         !src_reg->isAlwaysReady()) {
                         dependGraph.remove(src_reg->flatIndex(),
                                            squashed_inst);
-                        decrementNonReadyOperands();
+                        if ((src_reg->is(RegClassType::IntRegClass) ||
+                            src_reg->is(RegClassType::FloatRegClass) ||
+                            src_reg->is(RegClassType::VecRegClass)) &&
+                            !regScoreboard[src_reg->flatIndex()]
+                        ){
+                            DPRINTF(IQDEP, "Instruction PC %s has been squashed from the IQ.\n",
+                                    squashed_inst->pcState());
+                            DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ before.\n",
+                                    getNumNonReadyOperands());
+                            decrementNonReadyOperands();
+                            DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ after.\n",
+                                    getNumNonReadyOperands());
+                        }
                     }
 
                     ++iqStats.squashedOperandsExamined;
@@ -1511,6 +1578,13 @@ InstructionQueue::addToDependents(const DynInstPtr &new_inst)
     int8_t total_src_regs = new_inst->numSrcRegs();
     bool return_val = false;
 
+    int8_t non_ready_regs = 0;
+
+    DPRINTF(IQDEP, "Instruction PC %s is being added to the dependency chain.\n",
+                    new_inst->pcState());
+    DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
+                    getNumNonReadyOperands());
+
     for (int src_reg_idx = 0;
          src_reg_idx < total_src_regs;
          src_reg_idx++)
@@ -1531,7 +1605,19 @@ InstructionQueue::addToDependents(const DynInstPtr &new_inst)
                         new_inst->pcState(), src_reg->index(),
                         src_reg->className());
 
-                incrementNonReadyOperands();
+                RegClassType type = src_reg->classValue();
+                if (type == RegClassType::IntRegClass ||
+                    type == RegClassType::FloatRegClass ||
+                    type == RegClassType::VecRegClass
+                ){
+                    DPRINTF(IQDEP, "Instruction PC %s has src reg %i (%s) that "
+                            "is being added to the dependency chain.\n",
+                            new_inst->pcState(), src_reg->index(),
+                            src_reg->className());
+                    incrementNonReadyOperands();
+                    non_ready_regs++;
+                }
+
 
                 dependGraph.insert(src_reg->flatIndex(), new_inst);
 
@@ -1548,6 +1634,12 @@ InstructionQueue::addToDependents(const DynInstPtr &new_inst)
             }
         }
     }
+
+    DPRINTF(IQDEP, "Instruction PC %s has been added to the dependency chain.\n",
+                    new_inst->pcState());
+    DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
+                    getNumNonReadyOperands());
+    assert(getNumNonReadyOperands() < 610);
 
     return return_val;
 }

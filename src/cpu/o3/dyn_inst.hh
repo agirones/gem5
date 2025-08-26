@@ -45,6 +45,7 @@
 #include <cstdint>
 #include <list>
 #include <queue>
+#include <set>
 #include <string>
 
 #include "base/refcnt.hh"
@@ -1051,6 +1052,23 @@ class DynInst : public ExecContext, public RefCounted
 
     void setRegOperand(const StaticInst *si, int idx,
                        const void *val) override;
+
+  private:
+    std::set<unsigned long long> seen_deps;
+
+  public:
+    /** Counter for unique instructions that have woken up this instruction. */
+    unsigned int numUniqueWakers = 0;
+
+    void
+    updateUniqueDependencies(const DynInstPtr &dep_inst)
+    {
+        if (seen_deps.find(dep_inst->seqNum) == seen_deps.end()) {
+            seen_deps.insert(dep_inst->seqNum);
+            numUniqueWakers++;
+        }
+    }
+
 };
 
 } // namespace o3

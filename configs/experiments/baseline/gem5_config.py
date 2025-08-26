@@ -192,7 +192,7 @@ def config_cache(system):
 #        tag_latency="5",
 #        data_latency="5",
         size="32KiB",
-        assoc="8",
+        assoc="16",
         tag_latency="4",
         data_latency="4",
     )
