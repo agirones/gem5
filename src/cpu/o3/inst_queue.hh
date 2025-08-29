@@ -289,6 +289,12 @@ class InstructionQueue
     /** Increment the number of inflight non ready operands. */
     void incrementNonReadyOperands() { ++numNonReadyOperands; };
 
+    /** The number of inflight non ready operands. */
+    int numDependents(DynInstPtr inst);
+
+    /** Number of non ready operands in the IQ. */
+    int countNonReadyOperands();
+
   private:
     /** Does the actual squashing. */
     void doSquash(ThreadID tid);
@@ -497,6 +503,9 @@ class InstructionQueue
 
     /** The number of inflight non ready operands. */
     unsigned numNonReadyOperands;
+
+    /** The number of inflight non ready operands. */
+    std::vector<int> nonReadyScoreboard;
 
     struct IQStats : public statistics::Group
     {

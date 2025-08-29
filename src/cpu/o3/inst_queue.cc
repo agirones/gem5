@@ -50,6 +50,7 @@
 #include "cpu/o3/limits.hh"
 #include "debug/IQ.hh"
 #include "debug/IQDEP.hh"
+#include "debug/DebugSF.hh"
 #include "enums/OpClass.hh"
 #include "params/BaseO3CPU.hh"
 #include "sim/core.hh"
@@ -120,6 +121,8 @@ InstructionQueue::InstructionQueue(CPU *cpu_ptr, IEW *iew_ptr,
 
     // Resize the register scoreboard.
     regScoreboard.resize(numPhysRegs);
+
+    nonReadyScoreboard.resize(numPhysIntFloatVecRegs);
 
     //Initialize Mem Dependence Units
     for (ThreadID tid = 0; tid < MaxThreads; tid++) {
@@ -420,6 +423,10 @@ InstructionQueue::resetState()
     // unready.
     for (int i = 0; i < numPhysRegs; ++i) {
         regScoreboard[i] = false;
+    }
+
+    for (size_t i = 0; i < nonReadyScoreboard.size(); ++i) {
+        nonReadyScoreboard[i] = 0;
     }
 
     for (ThreadID tid = 0; tid < MaxThreads; ++tid) {
@@ -1129,6 +1136,13 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
 
         // Mark the scoreboard as having that register ready.
         regScoreboard[dest_reg->flatIndex()] = true;
+
+        if (dest_reg->is(RegClassType::IntRegClass) ||
+            dest_reg->is(RegClassType::FloatRegClass) ||
+            dest_reg->is(RegClassType::VecRegClass)
+        ){
+            nonReadyScoreboard[dest_reg->flatIndex()] = 0;
+        }
     }
     return dependents;
 }
@@ -1333,6 +1347,7 @@ InstructionQueue::doSquash(ThreadID tid)
                             DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ before.\n",
                                     getNumNonReadyOperands());
                             decrementNonReadyOperands();
+                            nonReadyScoreboard[src_reg->flatIndex()]--;
                             DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ after.\n",
                                     getNumNonReadyOperands());
                         }
@@ -1458,6 +1473,7 @@ InstructionQueue::addToDependents(const DynInstPtr &new_inst)
                             new_inst->pcState(), src_reg->index(),
                             src_reg->className());
                     incrementNonReadyOperands();
+                    nonReadyScoreboard[src_reg->flatIndex()]++;
                     non_ready_regs++;
                 }
 
@@ -1693,5 +1709,36 @@ InstructionQueue::dumpInsts()
     }
 }
 
+int
+InstructionQueue::numDependents(DynInstPtr inst){
+    DPRINTF(DebugSF, "In IQ numDependents\n");
+    assert(inst != NULL);
+    int numDependents = 0;
+    for (int dest_reg_idx = 0; dest_reg_idx < inst->numDestRegs(); dest_reg_idx++) {
+        DPRINTF(DebugSF, "In IQ numDependents before dest_reg\n");
+        PhysRegIdPtr dest_reg =
+            inst->renamedDestIdx(dest_reg_idx);
+        
+        if(dest_reg->flatIndex() < numPhysIntFloatVecRegs){
+            DPRINTF(DebugSF, "In IQ numDependents after dest_reg, flatIndex: %u\n",
+                    dest_reg->flatIndex());
+            numDependents += nonReadyScoreboard[dest_reg->flatIndex()];
+            DPRINTF(DebugSF, "In IQ numDependents after dependGraph\n");
+        }
+    }
+    return numDependents;
+}
+
+int
+InstructionQueue::countNonReadyOperands(){
+    int non_ready_operands = 0;
+    for (size_t i = 0; i < numPhysIntFloatVecRegs; ++i) {
+        if (!regScoreboard[i]) {
+            int dependents = dependGraph.numDependents(i);
+            non_ready_operands += dependents;
+        }
+    }
+    return non_ready_operands;
+}
 } // namespace o3
 } // namespace gem5

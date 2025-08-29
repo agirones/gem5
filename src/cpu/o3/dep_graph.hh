@@ -42,6 +42,7 @@
 #define __CPU_O3_DEP_GRAPH_HH__
 
 #include "cpu/o3/comm.hh"
+#include "debug/DebugSF.hh"
 
 namespace gem5
 {
@@ -97,7 +98,15 @@ class DependencyGraph
 
     /** Sets the producing instruction of a given register. */
     void setInst(RegIndex idx, const DynInstPtr &new_inst)
-    { dependGraph[idx].inst = new_inst; }
+    { 
+        dependGraph[idx].inst = new_inst; 
+        if (&dependGraph[idx] == reinterpret_cast<DepEntry*>(0xdf8948fffff503e8)) {
+            DPRINTF(DebugSF, "Attempting to set a node at the invalid address: %p\n", &dependGraph[idx]);
+        }
+        if (&dependGraph[idx] == reinterpret_cast<DepEntry*>(0x10bf590)) {
+            DPRINTF(DebugSF, "Attempting to set a next node at the invalid address: %p\n", &dependGraph[idx].next);
+        }
+    }
 
     /** Clears the producing instruction. */
     void clearInst(RegIndex idx)
@@ -201,6 +210,13 @@ DependencyGraph<DynInstPtr>::insert(RegIndex idx, const DynInstPtr &new_inst)
 
     // Then actually add it to the chain.
     dependGraph[idx].next = new_entry;
+
+    if (new_entry == reinterpret_cast<DepEntry*>(0xdf8948fffff503e8)) {
+        DPRINTF(DebugSF, "Attempting to insert a node at the invalid address: %p\n", new_entry);
+    }
+    if (new_entry == reinterpret_cast<DepEntry*>(0x10bf590)) {
+        DPRINTF(DebugSF, "Attempting to insert a next node at the invalid address: %p\n", new_entry->next);
+    }
 
     ++memAllocCounter;
 }
@@ -307,13 +323,18 @@ DependencyGraph<DynInstPtr>::numDependents(RegIndex idx)
 {
     int count = 0;
 
-    DepEntry *current = dependGraph[idx].next;
+    DPRINTF(DebugSF, "before current depentry\n");
+    DepEntry *curr= dependGraph[idx].next;
+    DPRINTF(DebugSF, "after current depentry\n");
     
     // Traverse the linked list until the end (NULL)
-    while (current != NULL) {
+    while (curr!= NULL) {
         count++;
-        current = current->next;
+        DPRINTF(DebugSF, "Current pointer address: %p\n", curr);
+        curr= curr->next;
+        DPRINTF(DebugSF, "after new current depentry\n");
     }
+    DPRINTF(DebugSF, "before returning depentry\n");
     
     return count;
 }

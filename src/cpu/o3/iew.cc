@@ -58,6 +58,8 @@
 #include "debug/Drain.hh"
 #include "debug/IEW.hh"
 #include "debug/RegIndex.hh"
+#include "debug/DebugSF.hh"
+#include "debug/SendCommit.hh"
 #include "debug/O3PipeView.hh"
 #include "debug/WakeUp.hh"
 #include "params/BaseO3CPU.hh"
@@ -124,6 +126,8 @@ IEW::IEW(CPU *_cpu, const BaseO3CPUParams &params)
     updateLSQNextCycle = false;
 
     skidBufferMax = (renameToIEWDelay + 1) * params.renameWidth;
+
+    broadcastProposalComparisons = 0;
 }
 
 std::string
@@ -310,7 +314,9 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     ADD_STAT(numUniqueWakers, statistics::units::Count::get(),
              "Number of unique instructions that woke up an instruction"),
     ADD_STAT(wakeupBaselineComparisons, statistics::units::Count::get(),
-             "Total number of comparisons in the IQ during wakeup in the baseline")
+             "Total number of comparisons in the IQ during wakeup in the baseline"),
+    ADD_STAT(broadcastProposalComparisons, statistics::units::Count::get(),
+             "Total number of comparisons in the IQ during wakeup in the broadcast proposal")
 {
     instsToCommit
         .init(cpu->numThreads)
@@ -550,6 +556,9 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
         .flags(statistics::total | statistics::pdf);
 
     wakeupBaselineComparisons
+        .flags(statistics::total);
+
+    broadcastProposalComparisons
         .flags(statistics::total);
 }
 
@@ -1852,25 +1861,73 @@ IEW::writebackInsts()
     // mark scoreboard that this instruction is finally complete.
     // Either have IEW have direct access to scoreboard, or have this
     // as part of backwards communication.
-    int nProd = 0;
-    int oneOrMoreCount = 0;
-    int twoOrMoreCount = 0;
-    int threeOrMoreCount = 0;
 
     int num_non_ready_operands_iq = instQueue.getNumNonReadyOperands();
+
+    const int broadcastMax = 1;
+    const int dependentsThreshold = 1;
+    int broadcastCount = 0;
+
+    while (!broadcastQueue.empty()){
+        if(broadcastCount >= broadcastMax){
+            break;
+        }
+        DynInstPtr inst = broadcastQueue.front();
+        if (inst->isSquashed()){
+            ppToCommit->notify(inst);
+            broadcastQueue.pop();
+            continue;
+        }
+
+        while ((inst->broadcasts < inst->numDestRegs()) &&
+               (broadcastCount < broadcastMax)
+        ){
+            DPRINTF(SendCommit, "Broadcasting [sn:%lli] from the broadcast Queue.\n",
+                    inst->seqNum);
+            inst->broadcasts++;
+            broadcastCount++;
+            iewStats.broadcastProposalComparisons += (num_non_ready_operands_iq);
+            iewStats.iqOccupancyHist.sample(num_non_ready_operands_iq);
+        }
+        if (inst->broadcasts < inst->numDestRegs()){
+            break;
+        } else {
+            ppToCommit->notify(inst);
+            if (!inst->isSquashed() && inst->isExecuted() &&
+                    inst->getFault() == NoFault) {
+
+                instQueue.wakeDependents(inst);
+
+                for (int i = 0; i < inst->numDestRegs(); i++) {
+                    // Mark register as ready if not pinned
+                    if (inst->renamedDestIdx(i)->
+                            getNumPinnedWritesToComplete() == 0) {
+                        DPRINTF(IEW,"Setting Destination Register %i (%s)\n",
+                                inst->renamedDestIdx(i)->index(),
+                                inst->renamedDestIdx(i)->className());
+                        scoreboard->setReg(inst->renamedDestIdx(i));
+                    }
+                }
+                broadcastCount++;
+            }
+            broadcastQueue.pop();
+        }
+
+    }
 
     for (int inst_num = 0; inst_num < wbWidth &&
              toCommit->insts[inst_num]; inst_num++) {
         DynInstPtr inst = toCommit->insts[inst_num];
         ThreadID tid = inst->threadNumber;
 
+        DPRINTF(SendCommit, "Sending instructions to commit, [sn:%lli] PC %s.\n",
+                inst->seqNum, inst->pcState());
+        DPRINTF(SendCommit, "iq: %u, broadcast queue: %d, skid buffer: %d.\n",
+                instQueue.getCount(tid), broadcastQueue.size(), skidBuffer[tid].size());
         DPRINTF(IEW, "Sending instructions to commit, [sn:%lli] PC %s.\n",
                 inst->seqNum, inst->pcState());
 
         iewStats.instsToCommit[tid]++;
-        // Notify potential listeners that execution is complete for this
-        // instruction.
-        ppToCommit->notify(inst);
 
         // Some instructions will be sent to commit without having
         // executed because they need commit to handle them.
@@ -1879,8 +1936,39 @@ IEW::writebackInsts()
         // when it's ready to execute the strictly ordered load.
         if (!inst->isSquashed() && inst->isExecuted() &&
                 inst->getFault() == NoFault) {
-            iewStats.wakeupBaselineComparisons += (num_non_ready_operands_iq * inst->numDestRegs());
+            DPRINTF(DebugSF,"Before numDependents\n");
+            int numDependents = instQueue.numDependents(inst);
+            DPRINTF(DebugSF,"After numDependents\n");
+            if (numDependents > dependentsThreshold && broadcastCount >= broadcastMax){
+                DPRINTF(SendCommit, "Adding [sn:%lli] to the broadcast Queue.\n",
+                        inst->seqNum);
+                broadcastQueue.push(inst);
+                continue;
+            } else if (numDependents > dependentsThreshold){
+                while ((inst->broadcasts < inst->numDestRegs()) &&
+                       (broadcastCount < broadcastMax)
+                ){
+                    DPRINTF(SendCommit, "Broadcasting [sn:%lli] against the IQ.\n",
+                            inst->seqNum);
+                    inst->broadcasts++;
+                    broadcastCount++;
+                    iewStats.broadcastProposalComparisons += (num_non_ready_operands_iq);
+                    iewStats.iqOccupancyHist.sample(num_non_ready_operands_iq);
+                }
+                if (inst->broadcasts < inst->numDestRegs()){
+                    DPRINTF(SendCommit, "Adding [sn:%lli] to the broadcast Queue.\n",
+                            inst->seqNum);
+                    broadcastQueue.push(inst);
+                    continue;
+                }
+            } else {
+                DPRINTF(SendCommit, "Precise wake up of [sn:%lli] against the IQ.\n",
+                        inst->seqNum);
+                iewStats.broadcastProposalComparisons += numDependents;
+            }
+
             int dependents = instQueue.wakeDependents(inst);
+            iewStats.wakeupBaselineComparisons += (num_non_ready_operands_iq * inst->numDestRegs());
 
             for (int i = 0; i < inst->numDestRegs(); i++) {
                 // Mark register as ready if not pinned
@@ -1892,96 +1980,11 @@ IEW::writebackInsts()
                     scoreboard->setReg(inst->renamedDestIdx(i));
                 }
             }
-
-            if(inst->numDestRegs()){
-                nProd++;
-                ++iewStats.execHasDestRegs;
-                iewStats.wakeupHasDestRegsHist.sample(dependents);
-                iewStats.iqOccupancyHist.sample(instQueue.getCount(inst->threadNumber));
-                iewStats.nonReadyInIQHist.sample(instQueue.getNumNonReadyOperands());
-                if(dependents > 2){
-                    iewStats.producerInstWakeupCounts[3]++;
-                } else {
-                    iewStats.producerInstWakeupCounts[dependents]++;
-                }
-                if(inst->isStore())
-                    ++iewStats.execHasDestRegsStore;
-                if(inst->isControl())
-                    ++iewStats.execHasDestRegsControl;
-                if(dependents){
-                    ++iewStats.execHasIQConsumers;
-                    iewStats.wakeupHasIQConsumersHist.sample(dependents);
-                } else{
-                    ++iewStats.execHasNoIQConsumers;
-                }
-            } else{
-                ++iewStats.execNoDestRegs;
-                if(inst->isStore())
-                    ++iewStats.execNoDestRegsStore;
-                if(inst->isControl())
-                    ++iewStats.execNoDestRegsControl;
-            }
-
-            if (dependents) {
-                iewStats.producerInst[tid]++;
-                iewStats.consumerInst[tid]+= dependents;
-                oneOrMoreCount++;
-                twoOrMoreCount += (dependents > 1) ? 1 : 0;
-                threeOrMoreCount += (dependents > 2) ? 1 : 0;
-                if (dependents > 15) {
-                    DPRINTF(WakeUp,"Waking up %d instructions due to instruction type: '%s'.\n",
-                            dependents,
-                            gem5::enums::OpClassStrings[inst->opClass()]);
-                }
-            } else {
-                iewStats.noWakeupInstType[inst->opClass()]++;
-                iewStats.noWakeupInst++;
-                if(inst->isLoad()){
-                    iewStats.noWakeupLoadInst++;
-                }
-                if(inst->isStore())
-                    iewStats.noWakeupStoreInst++;
-                if(inst->isControl())
-                    iewStats.noWakeupControlInst++;
-                if(inst->isCall())
-                    iewStats.noWakeupCallInst++;
-                if(inst->isReturn())
-                    iewStats.noWakeupReturnInst++;
-                if(inst->isDirectCtrl())
-                    iewStats.noWakeupDirectCtrlInst++;
-                if(inst->isIndirectCtrl())
-                    iewStats.noWakeupIndirectCtrlInst++;
-                if(inst->isCondCtrl())
-                    iewStats.noWakeupCondCtrlInst++;
-                if(inst->isUncondCtrl())
-                    iewStats.noWakeupUncondCtrlInst++;
-            }
-            iewStats.writebackCount[tid]++;
-            if(dependents > 2){
-                iewStats.wakeupInstructionsHistogram[3]++;
-            } else if(dependents == 0){
-                if(inst->isControl()){
-                    iewStats.wakeupInstructionsHistogram[5]++;
-                } else if(inst->isStore()){
-                    iewStats.wakeupInstructionsHistogram[4]++;
-                } else {
-                    iewStats.wakeupInstructionsHistogram[0]++;
-                }
-            } else { 
-                iewStats.wakeupInstructionsHistogram[dependents]++;
-            }
-
-            if(inst->numUniqueWakers > 2){
-                iewStats.numUniqueWakers[3]++;
-            } else {
-                iewStats.numUniqueWakers[inst->numUniqueWakers]++;
-            }
         }
+        // Notify potential listeners that execution is complete for this
+        // instruction.
+        ppToCommit->notify(inst);
     }
-    iewStats.producerInstPerCycle.sample(nProd);
-    iewStats.instWakeupOneOrMorePerCycle.sample(oneOrMoreCount);
-    iewStats.instWakeupTwoOrMorePerCycle.sample(twoOrMoreCount);
-    iewStats.instWakeupThreeOrMorePerCycle.sample(threeOrMoreCount);
 }
 
 void

@@ -106,6 +106,7 @@ for i in range(len(cpts)):
 #                    "--debug-flags=IQ",
 #                    "--debug-flags=IQDEP",
 #                    "--debug-flags=RegIndex",
+#                    "--debug-flags=DebugSF",
 #                    "--debug-file=trace.out",
 #                    "--debug-start=1342141375473",
 #                    "--debug-end=1464957618957",

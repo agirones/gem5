@@ -341,6 +341,10 @@ class IEW
     /** Scoreboard pointer. */
     Scoreboard* scoreboard;
 
+    /** Broadcast vector that contains all the instructions that should use broadcast next cycle. */
+    std::queue<DynInstPtr> broadcastQueue;
+
+
   private:
     /** CPU pointer. */
     CPU *cpu;
@@ -598,6 +602,8 @@ class IEW
         statistics::Vector numUniqueWakers;
         /* Total number of comparisons in the IQ during wakeup in the baseline. */
         statistics::Scalar wakeupBaselineComparisons;
+        /* Total number of comparisons in the IQ during wakeup in the broadcast proposal. */
+        statistics::Scalar broadcastProposalComparisons;
     } iewStats;
 };
 
