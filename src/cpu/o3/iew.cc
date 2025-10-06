@@ -316,7 +316,14 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     ADD_STAT(wakeupBaselineComparisons, statistics::units::Count::get(),
              "Total number of comparisons in the IQ during wakeup in the baseline"),
     ADD_STAT(broadcastProposalComparisons, statistics::units::Count::get(),
-             "Total number of comparisons in the IQ during wakeup in the broadcast proposal")
+             "Total number of comparisons in the IQ during wakeup in the broadcast proposal"),
+    ADD_STAT(wakeupMicroopDestOperands, statistics::units::Count::get(),
+             "Histogram of destination operands for micro-ops during wakeup"),
+    ADD_STAT(wakeupDestRegsByClass, statistics::units::Count::get(),
+             "Count of each physical register class used as a destination operand at wakeup"),
+    ADD_STAT(wakeupDestRegFixedMapping, statistics::units::Count::get(),
+             "Total number of dest regs which are isFixedMapping during wakeup")
+
 {
     instsToCommit
         .init(cpu->numThreads)
@@ -559,6 +566,26 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
         .flags(statistics::total);
 
     broadcastProposalComparisons
+        .flags(statistics::total);
+
+    wakeupMicroopDestOperands
+        .init(0, 8, 1)
+        .flags(statistics::pdf);
+
+    wakeupDestRegsByClass
+        .init(9)
+        .subname(0, "IntRegClass")
+        .subname(1, "FloatRegClass")
+        .subname(2, "VecRegClass")
+        .subname(3, "VecElemClass")
+        .subname(4, "VecPredRegClass")
+        .subname(5, "MatRegClass")
+        .subname(6, "CCRegClass")
+        .subname(7, "MiscRegClass")
+        .subname(8, "InvalidRegClass")
+        .flags(statistics::total | statistics::pdf);
+
+    wakeupDestRegFixedMapping
         .flags(statistics::total);
 }
 
@@ -895,6 +922,8 @@ IEW::instToCommit(const DynInstPtr& inst)
 
     DPRINTF(IEW, "Current wb cycle: %i, width: %i, numInst: %i\nwbActual:%i\n",
             wbCycle, wbWidth, wbNumInst, wbCycle * wbWidth + wbNumInst);
+    DPRINTF(IEW, "Instruction [sn:%lli] scheduled for writeback in cycle: %i (%i).\n",
+            inst->seqNum, wbCycle, wbCycle * wbWidth + wbNumInst);
     // Add finished instruction to queue to commit.
     (*iewQueue)[wbCycle].insts[wbNumInst] = inst;
     (*iewQueue)[wbCycle].size++;
@@ -1004,7 +1033,7 @@ IEW::checkStall(ThreadID tid)
         DPRINTF(IEW,"[tid:%i] Stall from Commit stage detected.\n",tid);
         ret_val = true;
     } else if (instQueue.isFull(tid)) {
-        DPRINTF(IEW,"[tid:%i] Stall: IQ  is full.\n",tid);
+        DPRINTF(IEW,"[tid:%i] Stall: IQ is full.\n",tid);
         ret_val = true;
     }
 
@@ -1862,58 +1891,8 @@ IEW::writebackInsts()
     // Either have IEW have direct access to scoreboard, or have this
     // as part of backwards communication.
 
+    const int dependentsThreshold = 3;
     int num_non_ready_operands_iq = instQueue.getNumNonReadyOperands();
-
-    const int broadcastMax = 1;
-    const int dependentsThreshold = 1;
-    int broadcastCount = 0;
-
-    while (!broadcastQueue.empty()){
-        if(broadcastCount >= broadcastMax){
-            break;
-        }
-        DynInstPtr inst = broadcastQueue.front();
-        if (inst->isSquashed()){
-            ppToCommit->notify(inst);
-            broadcastQueue.pop();
-            continue;
-        }
-
-        while ((inst->broadcasts < inst->numDestRegs()) &&
-               (broadcastCount < broadcastMax)
-        ){
-            DPRINTF(SendCommit, "Broadcasting [sn:%lli] from the broadcast Queue.\n",
-                    inst->seqNum);
-            inst->broadcasts++;
-            broadcastCount++;
-            iewStats.broadcastProposalComparisons += (num_non_ready_operands_iq);
-            iewStats.iqOccupancyHist.sample(num_non_ready_operands_iq);
-        }
-        if (inst->broadcasts < inst->numDestRegs()){
-            break;
-        } else {
-            ppToCommit->notify(inst);
-            if (!inst->isSquashed() && inst->isExecuted() &&
-                    inst->getFault() == NoFault) {
-
-                instQueue.wakeDependents(inst);
-
-                for (int i = 0; i < inst->numDestRegs(); i++) {
-                    // Mark register as ready if not pinned
-                    if (inst->renamedDestIdx(i)->
-                            getNumPinnedWritesToComplete() == 0) {
-                        DPRINTF(IEW,"Setting Destination Register %i (%s)\n",
-                                inst->renamedDestIdx(i)->index(),
-                                inst->renamedDestIdx(i)->className());
-                        scoreboard->setReg(inst->renamedDestIdx(i));
-                    }
-                }
-                broadcastCount++;
-            }
-            broadcastQueue.pop();
-        }
-
-    }
 
     for (int inst_num = 0; inst_num < wbWidth &&
              toCommit->insts[inst_num]; inst_num++) {
@@ -1926,6 +1905,9 @@ IEW::writebackInsts()
                 instQueue.getCount(tid), broadcastQueue.size(), skidBuffer[tid].size());
         DPRINTF(IEW, "Sending instructions to commit, [sn:%lli] PC %s.\n",
                 inst->seqNum, inst->pcState());
+        DPRINTF(IEW, "Inst [sn:%lli]: isSquashed=%i, isExecuted=%i, isNotFault=%i.\n",
+                inst->seqNum, inst->isSquashed(), inst->isExecuted(),
+                inst->getFault() == NoFault);
 
         iewStats.instsToCommit[tid]++;
 
@@ -1936,54 +1918,108 @@ IEW::writebackInsts()
         // when it's ready to execute the strictly ordered load.
         if (!inst->isSquashed() && inst->isExecuted() &&
                 inst->getFault() == NoFault) {
-            DPRINTF(DebugSF,"Before numDependents\n");
-            int numDependents = instQueue.numDependents(inst);
-            DPRINTF(DebugSF,"After numDependents\n");
-            if (numDependents > dependentsThreshold && broadcastCount >= broadcastMax){
-                DPRINTF(SendCommit, "Adding [sn:%lli] to the broadcast Queue.\n",
-                        inst->seqNum);
-                broadcastQueue.push(inst);
+
+            if (inst->isReadBarrier() || inst->isWriteBarrier()) {
+                instQueue.wakeDependents(inst);
+                DPRINTF(SendCommit, "Wake up of barrier [sn:%lli]. isRead: %i, isWrite: %i.\n",
+                        inst->seqNum, inst->isReadBarrier(), inst->isWriteBarrier());
                 continue;
-            } else if (numDependents > dependentsThreshold){
-                while ((inst->broadcasts < inst->numDestRegs()) &&
-                       (broadcastCount < broadcastMax)
-                ){
-                    DPRINTF(SendCommit, "Broadcasting [sn:%lli] against the IQ.\n",
-                            inst->seqNum);
-                    inst->broadcasts++;
-                    broadcastCount++;
-                    iewStats.broadcastProposalComparisons += (num_non_ready_operands_iq);
-                    iewStats.iqOccupancyHist.sample(num_non_ready_operands_iq);
-                }
-                if (inst->broadcasts < inst->numDestRegs()){
-                    DPRINTF(SendCommit, "Adding [sn:%lli] to the broadcast Queue.\n",
-                            inst->seqNum);
-                    broadcastQueue.push(inst);
-                    continue;
-                }
-            } else {
-                DPRINTF(SendCommit, "Precise wake up of [sn:%lli] against the IQ.\n",
-                        inst->seqNum);
-                iewStats.broadcastProposalComparisons += numDependents;
             }
 
-            int dependents = instQueue.wakeDependents(inst);
-            iewStats.wakeupBaselineComparisons += (num_non_ready_operands_iq * inst->numDestRegs());
+            if (inst->numDestRegs() == 0){
+                instQueue.wakeDependents(inst);
+            } else {
+                // Dest reg stats at wakeup
+                iewStats.wakeupMicroopDestOperands.sample(inst->numDests());
+                for (int i = 0; i < inst->numDestRegs(); ++i) {
+                    PhysRegIdPtr dest_reg = inst->renamedDestIdx(i);
+                    RegClassType type = dest_reg->classValue();
 
-            for (int i = 0; i < inst->numDestRegs(); i++) {
-                // Mark register as ready if not pinned
-                if (inst->renamedDestIdx(i)->
-                        getNumPinnedWritesToComplete() == 0) {
-                    DPRINTF(IEW,"Setting Destination Register %i (%s)\n",
-                            inst->renamedDestIdx(i)->index(),
-                            inst->renamedDestIdx(i)->className());
-                    scoreboard->setReg(inst->renamedDestIdx(i));
+                    if (type == InvalidRegClass){
+                        iewStats.wakeupDestRegsByClass[8]++;
+                    } else {
+                        iewStats.wakeupDestRegsByClass[type]++;
+                    }
+                    if (dest_reg->isFixedMapping()) {
+                        iewStats.wakeupDestRegFixedMapping++;
+                    }
+
+                    int numDependents = instQueue.numRegDependents(dest_reg);
+                    if (numDependents > dependentsThreshold) {
+                        broadcastQueue.push(std::make_pair(inst, dest_reg));
+                        DPRINTF(SendCommit, "Adding dest reg %i (%s) [sn:%lli] to the broadcast Queue (%i)\n",
+                                dest_reg->flatIndex(), dest_reg->className(), 
+                                inst->seqNum, broadcastQueue.size());
+                        if (type != InvalidRegClass){
+                            iewStats.wakeupBaselineComparisons += num_non_ready_operands_iq;
+                        }
+                    } else {
+                        DPRINTF(SendCommit, "Precise wake up of dest reg %i (%s) [sn:%lli] against the IQ.\n",
+                                dest_reg->flatIndex(), dest_reg->className(), inst->seqNum);
+                        instQueue.wakeRegDependents(inst, dest_reg);
+                        if (dest_reg->
+                                getNumPinnedWritesToComplete() == 0) {
+                            DPRINTF(IEW,"Setting Destination Register %i (%s)\n",
+                                    dest_reg->index(),
+                                    dest_reg->className());
+                            scoreboard->setReg(dest_reg);
+                        }
+                        if (type != InvalidRegClass){
+                            iewStats.broadcastProposalComparisons += numDependents;
+                            iewStats.wakeupBaselineComparisons += num_non_ready_operands_iq;
+                        }
+                    }
                 }
             }
         }
         // Notify potential listeners that execution is complete for this
         // instruction.
         ppToCommit->notify(inst);
+    }
+
+    const int broadcastMax = 3;
+    int broadcastCount = 0;
+
+    DPRINTF(SendCommit, "Processing the Broadcast Queue (%i), broadcastCount: %i.\n",
+            broadcastQueue.size(), broadcastCount);
+
+    while (!broadcastQueue.empty() &&
+            broadcastCount <= broadcastMax){
+        std::pair<DynInstPtr, PhysRegIdPtr>& currentPair = broadcastQueue.front();
+        DynInstPtr inst = std::move(currentPair.first);
+        PhysRegIdPtr dest_reg = std::move(currentPair.second);
+        RegClassType type = dest_reg->classValue();
+        DPRINTF(SendCommit, "Processing dest reg %i (%s) [sn:%lli] in broadcast Queue (%i).\n",
+                dest_reg->flatIndex(), dest_reg->className(), inst->seqNum, broadcastCount);
+
+        ppToCommit->notify(inst);
+
+        if (inst->isSquashed()){
+            broadcastQueue.pop();
+            continue;
+        }
+
+        DPRINTF(SendCommit, "Broadcasting dest reg %i (%s) [sn:%lli] from the broadcast Queue.\n",
+                dest_reg->flatIndex(), dest_reg->className(), inst->seqNum);
+        if (!inst->isSquashed() && inst->isExecuted() &&
+                inst->getFault() == NoFault) {
+            instQueue.wakeRegDependents(inst, dest_reg);
+
+            // Mark register as ready if not pinned
+            if (dest_reg->
+                    getNumPinnedWritesToComplete() == 0) {
+                DPRINTF(IEW,"Setting Destination Register %i (%s)\n",
+                        dest_reg->index(),
+                        dest_reg->className());
+                scoreboard->setReg(dest_reg);
+            }
+            if (type != InvalidRegClass){
+                broadcastCount++;
+                iewStats.broadcastProposalComparisons += (num_non_ready_operands_iq);
+                iewStats.iqOccupancyHist.sample(num_non_ready_operands_iq);
+            }
+        }
+        broadcastQueue.pop();
     }
 }
 

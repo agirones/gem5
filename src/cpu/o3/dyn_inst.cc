@@ -45,6 +45,7 @@
 #include "base/intmath.hh"
 #include "debug/DynInst.hh"
 #include "debug/IQ.hh"
+#include "debug/IEW.hh"
 #include "debug/O3PipeView.hh"
 
 namespace gem5
@@ -355,6 +356,10 @@ DynInst::execute()
     thread->noSquashFromTC = true;
 
     fault = staticInst->execute(this, traceData);
+
+    DPRINTF(IEW, "Execute: Instruction executed. PC: %s, [tid:%i]"
+                 " [sn:%llu]\n", this->pcState(), this->threadNumber,
+                 this->seqNum);
 
     thread->noSquashFromTC = no_squash_from_TC;
 

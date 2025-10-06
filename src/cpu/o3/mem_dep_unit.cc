@@ -38,6 +38,7 @@
 #include "cpu/o3/inst_queue.hh"
 #include "cpu/o3/limits.hh"
 #include "debug/MemDepUnit.hh"
+#include "debug/MemDepUnitCompleted.hh"
 #include "params/BaseO3CPU.hh"
 
 namespace gem5
@@ -411,6 +412,11 @@ MemDepUnit::completed(const DynInstPtr &inst)
 
     // Remove the instruction from the hash and the list.
     MemDepHashIt hash_it = memDepHash.find(inst->seqNum);
+
+    if (hash_it == memDepHash.end()) {
+        DPRINTF(MemDepUnitCompleted, "Completed mem instruction PC %s [sn:%lli] is making it crash.\n",
+                inst->pcState(), inst->seqNum);
+    }
 
     assert(hash_it != memDepHash.end());
 

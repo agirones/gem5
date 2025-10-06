@@ -127,6 +127,8 @@ class IEW
     ProbePointArg<DynInstPtr> *ppExecute;
     /** To probe when instruction execution is complete. */
     ProbePointArg<DynInstPtr> *ppToCommit;
+    /** To debug the number of comparisons. */
+    unsigned long broadcastProposalComparisons;
 
   public:
     /** Constructs a IEW with the given parameters. */
@@ -342,7 +344,7 @@ class IEW
     Scoreboard* scoreboard;
 
     /** Broadcast vector that contains all the instructions that should use broadcast next cycle. */
-    std::queue<DynInstPtr> broadcastQueue;
+    std::queue<std::pair<DynInstPtr, PhysRegIdPtr>> broadcastQueue;
 
 
   private:
@@ -604,6 +606,12 @@ class IEW
         statistics::Scalar wakeupBaselineComparisons;
         /* Total number of comparisons in the IQ during wakeup in the broadcast proposal. */
         statistics::Scalar broadcastProposalComparisons;
+        /* Histogram of destination operands for micro-ops during wakeup. */
+        statistics::Distribution wakeupMicroopDestOperands;
+        /* Count of each physical register class used as a destination operand at wakeup. */
+        statistics::Vector wakeupDestRegsByClass;
+        /* Total number of dest regs which are isFixedMapping during wakeup. */
+        statistics::Scalar wakeupDestRegFixedMapping;
     } iewStats;
 };
 

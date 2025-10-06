@@ -60,6 +60,7 @@
 #include "cpu/timebuf.hh"
 #include "enums/SMTQueuePolicy.hh"
 #include "sim/eventq.hh"
+#include "cpu/reg_class.hh"
 
 namespace gem5
 {
@@ -238,6 +239,9 @@ class InstructionQueue
     /** Wakes all dependents of a completed instruction. */
     int wakeDependents(const DynInstPtr &completed_inst);
 
+    /** Wakes all dependents of a given dest reg. */
+    int wakeRegDependents(const DynInstPtr &completed_inst, const PhysRegIdPtr &dest_reg);
+
     /** Adds a ready memory instruction to the ready list. */
     void addReadyMemInst(const DynInstPtr &ready_inst);
 
@@ -292,6 +296,9 @@ class InstructionQueue
     /** The number of inflight non ready operands. */
     int numDependents(DynInstPtr inst);
 
+    /** The number of inflight non ready operands. */
+    int numRegDependents(PhysRegIdPtr dest_reg);
+
     /** Number of non ready operands in the IQ. */
     int countNonReadyOperands();
 
@@ -335,9 +342,11 @@ class InstructionQueue
     // Instruction lists, ready queues, and ordering
     //////////////////////////////////////
 
+  public:
     /** List of all the instructions in the IQ (some of which may be issued). */
     std::list<DynInstPtr> instList[MaxThreads];
 
+  private:
     /** List of instructions that are ready to be executed. */
     std::list<DynInstPtr> instsToExecute;
 
@@ -499,8 +508,10 @@ class InstructionQueue
     /** Debugging function to dump out all instructions that are in the
      *  IQ.
      */
+  public:
     void dumpInsts();
 
+  private:
     /** The number of inflight non ready operands. */
     unsigned numNonReadyOperands;
 
@@ -568,6 +579,9 @@ class InstructionQueue
         statistics::Vector fuBusy;
         /** Number of times the FU was busy per instruction issued. */
         statistics::Formula fuBusyRate;
+        statistics::Vector wakeupDestRegsByClassOverall;
+        statistics::Vector wakeupDestRegsByClassEqual;
+        statistics::Vector wakeupDestRegsByClassDifferent;
     } iqStats;
 
    public:

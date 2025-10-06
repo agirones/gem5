@@ -1123,6 +1123,9 @@ LSQUnit::writeback(const DynInstPtr &inst, PacketPtr pkt)
         }
     }
 
+    DPRINTF(LSQUnit, "Adding inst [sn:%lli] to commit from lsq.\n",
+            inst->seqNum);
+
     // Need to insert instruction into queue to commit
     iewStage->instToCommit(inst);
 

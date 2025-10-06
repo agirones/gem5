@@ -226,7 +226,13 @@ InstructionQueue::IQStats::IQStats(CPU *cpu, const unsigned &total_width)
     ADD_STAT(fuBusy, statistics::units::Count::get(), "FU busy when requested"),
     ADD_STAT(fuBusyRate, statistics::units::Rate<
                 statistics::units::Count, statistics::units::Count>::get(),
-             "FU busy rate (busy events/executed inst)")
+             "FU busy rate (busy events/executed inst)"),
+    ADD_STAT(wakeupDestRegsByClassOverall, statistics::units::Count::get(),
+             "Count of each physical register class used as a destination operand at wakeup"),
+    ADD_STAT(wakeupDestRegsByClassEqual, statistics::units::Count::get(),
+             "Count of each physical register class used as a destination operand at wakeup when dependents and woken_src_reg are equal"),
+    ADD_STAT(wakeupDestRegsByClassDifferent, statistics::units::Count::get(),
+             "Count of each physical register class used as a destination operand at wakeup when dependents and woken_src_reg are different")
 {
     instsAdded
         .prereq(instsAdded);
@@ -332,6 +338,45 @@ InstructionQueue::IQStats::IQStats(CPU *cpu, const unsigned &total_width)
         .flags(statistics::total)
         ;
     fuBusyRate = fuBusy / instsIssued;
+
+    wakeupDestRegsByClassOverall
+        .init(9)
+        .subname(0, "IntRegClass")
+        .subname(1, "FloatRegClass")
+        .subname(2, "VecRegClass")
+        .subname(3, "VecElemClass")
+        .subname(4, "VecPredRegClass")
+        .subname(5, "MatRegClass")
+        .subname(6, "CCRegClass")
+        .subname(7, "MiscRegClass")
+        .subname(8, "InvalidRegClass")
+        .flags(statistics::total | statistics::pdf);
+
+    wakeupDestRegsByClassEqual
+        .init(9)
+        .subname(0, "IntRegClass")
+        .subname(1, "FloatRegClass")
+        .subname(2, "VecRegClass")
+        .subname(3, "VecElemClass")
+        .subname(4, "VecPredRegClass")
+        .subname(5, "MatRegClass")
+        .subname(6, "CCRegClass")
+        .subname(7, "MiscRegClass")
+        .subname(8, "InvalidRegClass")
+        .flags(statistics::total | statistics::pdf);
+
+    wakeupDestRegsByClassDifferent
+        .init(9)
+        .subname(0, "IntRegClass")
+        .subname(1, "FloatRegClass")
+        .subname(2, "VecRegClass")
+        .subname(3, "VecElemClass")
+        .subname(4, "VecPredRegClass")
+        .subname(5, "MatRegClass")
+        .subname(6, "CCRegClass")
+        .subname(7, "MiscRegClass")
+        .subname(8, "InvalidRegClass")
+        .flags(statistics::total | statistics::pdf);
 }
 
 InstructionQueue::IQIOStats::IQIOStats(statistics::Group *parent)
@@ -595,6 +640,21 @@ InstructionQueue::insert(const DynInstPtr &new_inst)
 
     DPRINTF(IQ, "Adding instruction [sn:%llu] PC %s to the IQ.\n",
             new_inst->seqNum, new_inst->pcState());
+    for (int src_idx = 0; src_idx < new_inst->numSrcRegs(); ++src_idx) {
+        if(!new_inst->readySrcIdx(src_idx)){
+            PhysRegIdPtr phys_src_reg = new_inst->renamedSrcIdx(src_idx);
+            DPRINTF(IQ, "Instruction [sn:%llu] has src reg %i (%s) not ready.\n",
+                    new_inst->seqNum, phys_src_reg->flatIndex(),
+                    phys_src_reg->className());
+        }
+    }
+
+    for (int dest_idx = 0; dest_idx < new_inst->numDestRegs(); ++dest_idx) {
+        PhysRegIdPtr phys_dest_reg = new_inst->renamedDestIdx(dest_idx);
+        DPRINTF(IQ, "Instruction [sn:%llu] has dest reg %i (%s).\n",
+                new_inst->seqNum, phys_dest_reg->flatIndex(),
+                phys_dest_reg->className());
+    }
 
     assert(freeEntries != 0);
 
@@ -620,6 +680,9 @@ InstructionQueue::insert(const DynInstPtr &new_inst)
 
     ++iqStats.instsAdded;
 
+    DPRINTF(IQ, "Occupancy: Dispatch instruction [sn:%llu] "
+            "in the IQ.\n",
+            new_inst->seqNum);
     count[new_inst->threadNumber]++;
 
     assert(freeEntries == (numEntries - countInsts()));
@@ -666,6 +729,9 @@ InstructionQueue::insertNonSpec(const DynInstPtr &new_inst)
 
     ++iqStats.nonSpecInstsAdded;
 
+    DPRINTF(IQ, "Occupancy: Dispatch instruction [sn:%llu] "
+            "in the IQ.\n",
+            new_inst->seqNum);
     count[new_inst->threadNumber]++;
 
     assert(freeEntries == (numEntries - countInsts()));
@@ -920,6 +986,9 @@ InstructionQueue::scheduleReadyInsts()
             if (!issuing_inst->isMemRef()) {
                 // Memory instructions can not be freed from the IQ until they
                 // complete.
+                DPRINTF(IQ, "Occupancy: Freeing no-mem instruction [sn:%llu] "
+                        "from the IQ.\n",
+                        issuing_inst->seqNum);
                 ++freeEntries;
                 count[tid]--;
                 issuing_inst->clearInIQ();
@@ -1024,19 +1093,25 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
     // instruction if it is a memory instruction.  Also complete the memory
     // instruction at this point since we know it executed without issues.
     ThreadID tid = completed_inst->threadNumber;
-    if (completed_inst->isMemRef()) {
+    if (completed_inst->isMemRef() &&
+        !completed_inst->has_woken_up) {
         memDepUnit[tid].completeInst(completed_inst);
 
         DPRINTF(IQ, "Completing mem instruction PC: %s [sn:%llu]\n",
             completed_inst->pcState(), completed_inst->seqNum);
-
+        DPRINTF(IQ, "Occupancy: Freeing mem instruction [sn:%llu] "
+                "from the IQ.\n",
+                completed_inst->seqNum);
         ++freeEntries;
         completed_inst->memOpDone(true);
         count[tid]--;
-    } else if (completed_inst->isReadBarrier() ||
-               completed_inst->isWriteBarrier()) {
+        completed_inst->has_woken_up = true;
+    } else if ((completed_inst->isReadBarrier() ||
+                completed_inst->isWriteBarrier()) &&
+                !completed_inst->has_woken_up) {
         // Completes a non mem ref barrier
         memDepUnit[tid].completeInst(completed_inst);
+        completed_inst->has_woken_up = true;
     }
 
     std::set<unsigned long long> seen_deps;
@@ -1055,6 +1130,9 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
             }
         }
 
+        DPRINTF(IQ, "Instruction [sn:%llu] is waking dependents for register %i (%s).\n",
+                completed_inst->seqNum, dest_reg->flatIndex(),
+                dest_reg->className());
         DPRINTF(IQDEP, "Instruction PC %s is waking dependents for register %i (%s).\n",
                 completed_inst->pcState(), dest_reg->index(),
                 dest_reg->className());
@@ -1144,6 +1222,166 @@ InstructionQueue::wakeDependents(const DynInstPtr &completed_inst)
             nonReadyScoreboard[dest_reg->flatIndex()] = 0;
         }
     }
+    return dependents;
+}
+
+int
+InstructionQueue::wakeRegDependents(const DynInstPtr &completed_inst, const PhysRegIdPtr &dest_reg)
+{
+    int dependents = 0;
+
+    // The instruction queue here takes care of both floating and int ops
+    if (!completed_inst->has_woken_up){
+        if (completed_inst->isFloating()) {
+            iqIOStats.fpInstQueueWakeupAccesses++;
+        } else if (completed_inst->isVector()) {
+            iqIOStats.vecInstQueueWakeupAccesses++;
+        } else {
+            iqIOStats.intInstQueueWakeupAccesses++;
+        }
+    }
+
+    completed_inst->lastWakeDependents = curTick();
+
+    DPRINTF(IQ, "Waking dependents of completed instruction.\n");
+
+    DPRINTF(IQDEP, "Instruction [sn:%llu] is waking dependents.\n",
+                    completed_inst->seqNum);
+    DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
+                    getNumNonReadyOperands());
+    DPRINTF(IQDEP, "Instruction [sn:%llu] isMemRef: %i, has woken up: %i.\n",
+                    completed_inst->seqNum, completed_inst->isMemRef(),
+                    completed_inst->has_woken_up);
+
+    assert(!completed_inst->isSquashed());
+
+    // Tell the memory dependence unit to wake any dependents on this
+    // instruction if it is a memory instruction.  Also complete the memory
+    // instruction at this point since we know it executed without issues.
+    ThreadID tid = completed_inst->threadNumber;
+    if (completed_inst->isMemRef() &&
+        !completed_inst->has_woken_up) {
+        memDepUnit[tid].completeInst(completed_inst);
+
+        DPRINTF(IQ, "Completing mem instruction PC: %s [sn:%llu]\n",
+            completed_inst->pcState(), completed_inst->seqNum);
+        DPRINTF(IQ, "Occupancy: Freeing entry of mem instruction [sn:%llu] "
+                "from the IQ.\n",
+            completed_inst->seqNum);
+        ++freeEntries;
+        completed_inst->memOpDone(true);
+        count[tid]--;
+        completed_inst->has_woken_up = true;
+    } else if ((completed_inst->isReadBarrier() ||
+                completed_inst->isWriteBarrier()) &&
+                !completed_inst->has_woken_up) {
+        // Completes a non mem ref barrier
+        memDepUnit[tid].completeInst(completed_inst);
+        completed_inst->has_woken_up = true;
+    }
+
+    // Special case of uniq or control registers.  They are not
+    // handled by the IQ and thus have no dependency graph entry.
+    if (dest_reg->isFixedMapping()) {
+        DPRINTF(IQ, "Reg %d [%s] is part of a fix mapping, skipping\n",
+                dest_reg->index(), dest_reg->className());
+        return 0;
+    }
+
+    // Avoid waking up dependents if the register is pinned
+    dest_reg->decrNumPinnedWritesToComplete();
+    if (dest_reg->isPinned())
+        completed_inst->setPinnedRegsWritten();
+
+    if (dest_reg->getNumPinnedWritesToComplete() != 0) {
+        DPRINTF(IQ, "Reg %d [%s] is pinned, skipping\n",
+                dest_reg->index(), dest_reg->className());
+        return 0;
+    }
+
+    DPRINTF(IQ, "Waking any dependents on register %i (%s).\n",
+            dest_reg->index(),
+            dest_reg->className());
+
+    RegClassType type = dest_reg->classValue();
+    if (type == InvalidRegClass){
+        iqStats.wakeupDestRegsByClassOverall[8]++;
+    } else {
+        iqStats.wakeupDestRegsByClassOverall[type]++;
+    }
+    //Go through the dependency chain, marking the registers as
+    //ready within the waiting instructions.
+    DynInstPtr dep_inst = dependGraph.pop(dest_reg->flatIndex());
+
+    int8_t woken_src_regs = 0;
+
+    while (dep_inst) {
+        DPRINTF(IQ, "Waking up a dependent instruction, [sn:%llu] "
+                "PC %s.\n", dep_inst->seqNum, dep_inst->pcState());
+
+        // Might want to give more information to the instruction
+        // so that it knows which of its source registers is
+        // ready.  However that would mean that the dependency
+        // graph entries would need to hold the src_reg_idx.
+        dep_inst->markSrcRegReady();
+
+        addIfReady(dep_inst);
+
+        if (dest_reg->is(RegClassType::IntRegClass) ||
+            dest_reg->is(RegClassType::FloatRegClass) ||
+            dest_reg->is(RegClassType::VecRegClass)
+        ){
+            DPRINTF(IQDEP, "Instruction PC %s has src reg %i (%s) that "
+                    "is being woken up.\n",
+                    dep_inst->pcState(), dest_reg->index(),
+                    dest_reg->className());
+            DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
+                    getNumNonReadyOperands());
+            woken_src_regs++;
+            decrementNonReadyOperands();
+
+            dep_inst->updateUniqueDependencies(completed_inst);
+        }
+
+        dep_inst = dependGraph.pop(dest_reg->flatIndex());
+
+        ++dependents;
+
+    }
+    if (dependents == woken_src_regs){
+        if (type == InvalidRegClass){
+            iqStats.wakeupDestRegsByClassEqual[8]++;
+        } else {
+            iqStats.wakeupDestRegsByClassEqual[type]++;
+        }
+    } else {
+        if (type == InvalidRegClass){
+            iqStats.wakeupDestRegsByClassDifferent[8]++;
+        } else {
+            iqStats.wakeupDestRegsByClassDifferent[type]++;
+        }
+    }
+
+    DPRINTF(IQDEP, "Instruction PC %s has woken %d registers in the IQ.\n",
+                    completed_inst->pcState(), woken_src_regs);
+    DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
+                    getNumNonReadyOperands());
+
+    // Reset the head node now that all of its dependents have
+    // been woken up.
+    assert(dependGraph.empty(dest_reg->flatIndex()));
+    dependGraph.clearInst(dest_reg->flatIndex());
+
+    // Mark the scoreboard as having that register ready.
+    regScoreboard[dest_reg->flatIndex()] = true;
+
+    if (dest_reg->is(RegClassType::IntRegClass) ||
+        dest_reg->is(RegClassType::FloatRegClass) ||
+        dest_reg->is(RegClassType::VecRegClass)
+    ){
+        nonReadyScoreboard[dest_reg->flatIndex()] = 0;
+    }
+    assert(freeEntries == (numEntries - countInsts()));
     return dependents;
 }
 
@@ -1392,6 +1630,9 @@ InstructionQueue::doSquash(ThreadID tid)
             squashed_inst->clearInIQ();
 
             //Update Thread IQ Count
+            DPRINTF(IQ, "Occupancy: Freeing squashed instruction [sn:%llu] "
+                    "from the IQ.\n",
+                    squashed_inst->seqNum);
             count[squashed_inst->threadNumber]--;
 
             ++freeEntries;
@@ -1725,6 +1966,16 @@ InstructionQueue::numDependents(DynInstPtr inst){
             numDependents += nonReadyScoreboard[dest_reg->flatIndex()];
             DPRINTF(DebugSF, "In IQ numDependents after dependGraph\n");
         }
+    }
+    return numDependents;
+}
+
+int
+InstructionQueue::numRegDependents(PhysRegIdPtr dest_reg){
+    assert(dest_reg != NULL);
+    int numDependents = 0;
+    if(dest_reg->flatIndex() < numPhysIntFloatVecRegs){
+        numDependents += nonReadyScoreboard[dest_reg->flatIndex()];
     }
     return numDependents;
 }
