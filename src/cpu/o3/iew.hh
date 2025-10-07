@@ -612,6 +612,26 @@ class IEW
         statistics::Vector wakeupDestRegsByClass;
         /* Total number of dest regs which are isFixedMapping during wakeup. */
         statistics::Scalar wakeupDestRegFixedMapping;
+        /**Histogram of how many dest regs an inst have that are counted for the broadcasting.*/
+        statistics::Distribution wakeupBroadcastRegsPerInst;
+        /** Number of insts without destination registers encountered during wake up.*/
+        statistics::Scalar wakeup0DestRegs;
+        /** Number of stores without destination registers encountered during wake up.*/
+        statistics::Scalar wakeupStore0DestRegs;
+        /** Number of branches without destination registers encountered during wake up.*/
+        statistics::Scalar wakeupBranch0DestRegs;
+        /** Number of insts with destination registers encountered during wake up.*/
+        statistics::Scalar wakeupAnyDestRegs;
+        /** Number of stores with destination registers encountered during wake up.*/
+        statistics::Scalar wakeupStoreAnyDestRegs;
+        /** Number of branches with destination registers encountered during wake up.*/
+        statistics::Scalar wakeupBranchAnyDestRegs;
+        /** Number of destination registers with one dependent in the IQ encountered during wake up.*/
+        statistics::Scalar wakeup1Dependent;
+        /** Number of destination registers with two dependents in the IQ encountered during wake up.*/
+        statistics::Scalar wakeup2Dependent;
+        /** Number of destination registers with three or more dependents in the IQ encountered during wake up.*/
+        statistics::Scalar wakeup3OrMoreDependent;
     } iewStats;
 };
 

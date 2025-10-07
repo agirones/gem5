@@ -322,8 +322,27 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     ADD_STAT(wakeupDestRegsByClass, statistics::units::Count::get(),
              "Count of each physical register class used as a destination operand at wakeup"),
     ADD_STAT(wakeupDestRegFixedMapping, statistics::units::Count::get(),
-             "Total number of dest regs which are isFixedMapping during wakeup")
-
+             "Total number of dest regs which are isFixedMapping during wakeup"),
+    ADD_STAT(wakeupBroadcastRegsPerInst, statistics::units::Count::get(),
+             "Histogram of how many dest regs an inst have that are counted for the broadcasting."),
+    ADD_STAT(wakeup0DestRegs, statistics::units::Count::get(),
+             "Number of insts without destination registers encountered during wake up."),
+    ADD_STAT(wakeupStore0DestRegs, statistics::units::Count::get(),
+             "Number of stores without destination registers encountered during wake up."),
+    ADD_STAT(wakeupBranch0DestRegs, statistics::units::Count::get(),
+             "Number of branches without destination registers encountered during wake up."),
+    ADD_STAT(wakeupAnyDestRegs, statistics::units::Count::get(),
+             "Number of insts with destination registers encountered during wake up."),
+    ADD_STAT(wakeupStoreAnyDestRegs, statistics::units::Count::get(),
+             "Number of stores with destination registers encountered during wake up."),
+    ADD_STAT(wakeupBranchAnyDestRegs, statistics::units::Count::get(),
+             "Number of branches with destination registers encountered during wake up."),
+    ADD_STAT(wakeup1Dependent, statistics::units::Count::get(),
+             "Number of destination registers with one dependent in the IQ encountered during wake up."),
+    ADD_STAT(wakeup2Dependent, statistics::units::Count::get(),
+             "Number of destination registers with two dependents in the IQ encountered during wake up."),
+    ADD_STAT(wakeup3OrMoreDependent, statistics::units::Count::get(),
+             "Number of destination registers with three or more dependents in the IQ encountered during wake up.")
 {
     instsToCommit
         .init(cpu->numThreads)
@@ -587,6 +606,10 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
 
     wakeupDestRegFixedMapping
         .flags(statistics::total);
+
+    wakeupBroadcastRegsPerInst
+        .init(0,8,1)
+        .flags(statistics::pdf);
 }
 
 IEW::IEWStats::ExecutedInstStats::ExecutedInstStats(CPU *cpu)
@@ -1891,7 +1914,7 @@ IEW::writebackInsts()
     // Either have IEW have direct access to scoreboard, or have this
     // as part of backwards communication.
 
-    const int dependentsThreshold = 3;
+    const int dependentsThreshold = -1;
     int num_non_ready_operands_iq = instQueue.getNumNonReadyOperands();
 
     for (int inst_num = 0; inst_num < wbWidth &&
@@ -1919,18 +1942,24 @@ IEW::writebackInsts()
         if (!inst->isSquashed() && inst->isExecuted() &&
                 inst->getFault() == NoFault) {
 
-            if (inst->isReadBarrier() || inst->isWriteBarrier()) {
-                instQueue.wakeDependents(inst);
-                DPRINTF(SendCommit, "Wake up of barrier [sn:%lli]. isRead: %i, isWrite: %i.\n",
-                        inst->seqNum, inst->isReadBarrier(), inst->isWriteBarrier());
-                continue;
-            }
-
+            iewStats.wakeupMicroopDestOperands.sample(inst->numDests());
             if (inst->numDestRegs() == 0){
                 instQueue.wakeDependents(inst);
+                iewStats.wakeup0DestRegs++;
+                if (inst->isStore()){
+                    iewStats.wakeupStore0DestRegs++;
+                } else if (inst->isControl()){
+                    iewStats.wakeupBranch0DestRegs++;
+                }
             } else {
+                iewStats.wakeupAnyDestRegs++;
+                if (inst->isStore()){
+                    iewStats.wakeupStoreAnyDestRegs++;
+                } else if (inst->isControl()){
+                    iewStats.wakeupBranchAnyDestRegs++;
+                }
+                int broadcast_regs = 0;
                 // Dest reg stats at wakeup
-                iewStats.wakeupMicroopDestOperands.sample(inst->numDests());
                 for (int i = 0; i < inst->numDestRegs(); ++i) {
                     PhysRegIdPtr dest_reg = inst->renamedDestIdx(i);
                     RegClassType type = dest_reg->classValue();
@@ -1950,8 +1979,20 @@ IEW::writebackInsts()
                         DPRINTF(SendCommit, "Adding dest reg %i (%s) [sn:%lli] to the broadcast Queue (%i)\n",
                                 dest_reg->flatIndex(), dest_reg->className(), 
                                 inst->seqNum, broadcastQueue.size());
-                        if (type != InvalidRegClass){
-                            iewStats.wakeupBaselineComparisons += num_non_ready_operands_iq;
+                        if (type != InvalidRegClass &&
+                            type != CCRegClass &&
+                            type != MiscRegClass){
+                            broadcast_regs++;
+                            switch (numDependents) {
+                                case 1: 
+                                    iewStats.wakeup1Dependent++;
+                                    break;
+                                case 2:
+                                    iewStats.wakeup2Dependent++;
+                                    break;
+                                default:
+                                    iewStats.wakeup3OrMoreDependent++;
+                            }
                         }
                     } else {
                         DPRINTF(SendCommit, "Precise wake up of dest reg %i (%s) [sn:%lli] against the IQ.\n",
@@ -1964,12 +2005,14 @@ IEW::writebackInsts()
                                     dest_reg->className());
                             scoreboard->setReg(dest_reg);
                         }
-                        if (type != InvalidRegClass){
-                            iewStats.broadcastProposalComparisons += numDependents;
+                        if (type != InvalidRegClass &&
+                            type != CCRegClass &&
+                            type != MiscRegClass){
                             iewStats.wakeupBaselineComparisons += num_non_ready_operands_iq;
                         }
                     }
                 }
+                iewStats.wakeupBroadcastRegsPerInst.sample(broadcast_regs);
             }
         }
         // Notify potential listeners that execution is complete for this
@@ -1977,7 +2020,7 @@ IEW::writebackInsts()
         ppToCommit->notify(inst);
     }
 
-    const int broadcastMax = 3;
+    const int broadcastMax = 8;
     int broadcastCount = 0;
 
     DPRINTF(SendCommit, "Processing the Broadcast Queue (%i), broadcastCount: %i.\n",
@@ -2013,9 +2056,11 @@ IEW::writebackInsts()
                         dest_reg->className());
                 scoreboard->setReg(dest_reg);
             }
-            if (type != InvalidRegClass){
+            if (type != InvalidRegClass &&
+                type != CCRegClass &&
+                type != MiscRegClass){
                 broadcastCount++;
-                iewStats.broadcastProposalComparisons += (num_non_ready_operands_iq);
+                iewStats.wakeupBaselineComparisons += num_non_ready_operands_iq;
                 iewStats.iqOccupancyHist.sample(num_non_ready_operands_iq);
             }
         }
