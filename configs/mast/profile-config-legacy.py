@@ -122,7 +122,7 @@ def config_system(system):
         cpu.renameWidth = args.cpu_width
         cpu.dispatchWidth = args.cpu_width
         cpu.issueWidth = args.cpu_width
-        cpu.wbWidth = args.cpu_width
+        cpu.wbWidth = 12
         cpu.commitWidth = args.cpu_width
 
         cpu.numIQEntries = 205
@@ -151,50 +151,48 @@ def config_cache(system):
 
     l3_config = dict(
         clk_domain=system.cpu_clk_domain,
-#        size="6MiB",
+        tag_latency="30",
+        data_latency="30",
+        size="32MiB",
+        assoc="16",
+#        tag_latency="35",
+#        data_latency="35",
+#        size="3MiB",
 #        assoc="12",
-        tag_latency="35",
-        data_latency="35",
-        size="3MiB",
-        assoc="12",
-#        tag_latency="40",
-#        data_latency="40",
     )
 
     l2_config = dict(
         clk_domain=system.cpu_clk_domain,
-#        size="1280KiB",
-#        assoc="20",
-        tag_latency="11",
-        data_latency="11",
-        size="1MiB",
-        assoc="16",
-#        tag_latency="12",
-#        data_latency="12",
+        size="1280KiB",
+        assoc="10",
+        tag_latency="4",
+        data_latency="4",
+#        tag_latency="11",
+#        data_latency="11",
+#        size="1MiB",
+#        assoc="16",
     )
 
     l1i_config = dict(
         size="32KiB",
         assoc="8",
-#        tag_latency="2",
-#        data_latency="2",
-        tag_latency="4",
-        data_latency="4",
-#        tag_latency="1",
-#        data_latency="1",
+        tag_latency="1",
+        data_latency="1",
+#        tag_latency="4",
+#        data_latency="4",
     )
 
     l1d_config = dict(
-#        size="48KiB",
-#        assoc="12",
-#        tag_latency="2",
-#        data_latency="2",
+        size="48KiB",
+        assoc="12",
+        tag_latency="1",
+        data_latency="1",
 #        tag_latency="5",
 #        data_latency="5",
-        size="32KiB",
-        assoc="8",
-        tag_latency="4",
-        data_latency="4",
+#        size="32KiB",
+#        assoc="8",
+#        tag_latency="4",
+#        data_latency="4",
     )
 
     system.l3 = l3_cache_class(**l3_config)
