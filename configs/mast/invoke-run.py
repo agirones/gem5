@@ -51,6 +51,13 @@ parser.add_argument(
     help="Path or name of the gem5 configuration script to use (e.g., 'configs/my_system.py' or 'custom_config')."
 )
 
+parser.add_argument(
+    "--cpt",
+    type=int,
+    required=False,
+    help="The checkpoint that would be executed."
+)
+
 args = parser.parse_args()
 
 
@@ -77,6 +84,44 @@ def setup_cpt_dir(cpt):
         shutil.rmtree(tgt)
     os.makedirs(tgt, exist_ok=True)
     os.chdir(tgt)
+
+
+if args.mode == "cpt":
+    print("Running in cpt mode.")
+    simpoint_cpt_dir = "/cluster/projects/mast/checkpoints/simpoint-checkpoints"
+    cpts = os.listdir(f"{simpoint_cpt_dir}/{benchmark.name}-cpt")
+    cpts.sort()
+    #assert(len(cpts) > 0)
+
+    setup_run_dir()
+
+    cpt = cpts[args.cpt]
+    setup_cpt_dir(cpt)
+    subprocess.run([f"{root}/build/X86/gem5.opt",
+#                    "--debug-flags=O3PipeView",
+#                    "--debug-flags=IEW",
+#                    "--debug-flags=IQ",
+#                    "--debug-flags=IQDEP",
+#                    "--debug-flags=RegIndex",
+#                    "--debug-flags=DebugSF",
+#                    "--debug-flags=MemDepUnit",
+#                    "--debug-flags=Commit",
+#                    "--debug-flags=Rename",
+#                    "--debug-flags=LSQUnit",
+#                    "--debug-flags=DynInst",
+#                    "--debug-flags=O3CPUAll",
+#                    "--debug-file=trace.out",
+#                    "--debug-start=18049387232646",
+#                    "--debug-end=18049636479483",
+#                    "--debug-break=18049636479483",
+                    f"{args.config}",
+                    "--benchmark-num", str(args.benchmark_num),
+                    "--mode", "simrun",
+                    "--simpoint-num", str(args.cpt),
+                    "--cpu-width", str(args.cpu_width),
+                    "--run-base-dir", args.output_dir])
+    cleanup()
+    exit(0)
 
 if not args.mode == "simrun":
     setup_run_dir()
@@ -108,6 +153,7 @@ for i in range(len(cpts)):
 #                    "--debug-flags=RegIndex",
 #                    "--debug-flags=DebugSF",
 #                    "--debug-file=trace.out",
+#                    "--debug-flags=CommitP",
 #                    "--debug-start=1342141375473",
 #                    "--debug-end=1464957618957",
                     f"{args.config}",

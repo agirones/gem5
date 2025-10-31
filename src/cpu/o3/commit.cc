@@ -58,6 +58,7 @@
 #include "cpu/timebuf.hh"
 #include "debug/Activity.hh"
 #include "debug/Commit.hh"
+#include "debug/CommitP.hh"
 #include "debug/CommitRate.hh"
 #include "debug/Drain.hh"
 #include "debug/ExecFaulting.hh"
@@ -131,6 +132,7 @@ Commit::Commit(CPU *_cpu, const BaseO3CPUParams &params)
         htmStops[tid] = 0;
     }
     interrupt = NoFault;
+    noCommitCounter = 0;
 }
 
 std::string Commit::name() const { return cpu->name() + ".commit"; }
@@ -639,6 +641,7 @@ Commit::tick()
             DPRINTF(Commit,"[tid:%i] Instruction [sn:%llu] PC %s is head of"
                     " ROB and ready to commit\n",
                     tid, inst->seqNum, inst->pcState());
+            noCommitCounter = 0;
 
         } else if (!rob->isEmpty(tid)) {
             const DynInstPtr &inst = rob->readHeadInst(tid);
@@ -646,8 +649,13 @@ Commit::tick()
             ppCommitStall->notify(inst);
 
             DPRINTF(Commit,"[tid:%i] Can't commit, Instruction [sn:%llu] PC "
+                    "%s is head of ROB and not ready. noCommitCounter = %i.\n",
+                    tid, inst->seqNum, inst->pcState(), noCommitCounter);
+            DPRINTF(CommitP,"[tid:%i] Can't commit, Instruction [sn:%llu] PC "
                     "%s is head of ROB and not ready\n",
                     tid, inst->seqNum, inst->pcState());
+            assert(noCommitCounter < noCommitThreashold);
+            noCommitCounter++;
         }
 
         DPRINTF(Commit, "[tid:%i] ROB has %d insts & %d free entries.\n",

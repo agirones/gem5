@@ -110,12 +110,12 @@ def config_system(system):
 #        for fupool in cpu.fuPool.FUList:
 #            fupool.count = 8
         
-        fu_list = cpu.fuPool.FUList[0].count = 5
-        fu_list = cpu.fuPool.FUList[1].count = 3
-        fu_list = cpu.fuPool.FUList[4].count = 3
-        fu_list = cpu.fuPool.FUList[5].count = 2
-        fu_list = cpu.fuPool.FUList[7].count = 2
-        fu_list = cpu.fuPool.FUList[8].count = 0
+        fu_list = cpu.fuPool.FUList[0].count = 5 # IntAlu
+        fu_list = cpu.fuPool.FUList[1].count = 3 # IntMultDiv
+        fu_list = cpu.fuPool.FUList[4].count = 3 # ReadPort
+        fu_list = cpu.fuPool.FUList[5].count = 2 # SIMD_Unit
+        fu_list = cpu.fuPool.FUList[7].count = 2 # PredALU
+        fu_list = cpu.fuPool.FUList[8].count = 0 # WritePort
 
         cpu.fetchWidth = args.cpu_width
         cpu.decodeWidth = args.cpu_width

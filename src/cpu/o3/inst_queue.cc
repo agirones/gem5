@@ -1245,8 +1245,9 @@ InstructionQueue::wakeRegDependents(const DynInstPtr &completed_inst, const Phys
 
     DPRINTF(IQ, "Waking dependents of completed instruction.\n");
 
-    DPRINTF(IQDEP, "Instruction [sn:%llu] is waking dependents.\n",
-                    completed_inst->seqNum);
+    DPRINTF(IQDEP, "Instruction [sn:%llu] is waking dependents for reg %d [%s].\n",
+                    completed_inst->seqNum,
+                    dest_reg->index(), dest_reg->className());
     DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
                     getNumNonReadyOperands());
     DPRINTF(IQDEP, "Instruction [sn:%llu] isMemRef: %i, has woken up: %i.\n",
@@ -1293,9 +1294,10 @@ InstructionQueue::wakeRegDependents(const DynInstPtr &completed_inst, const Phys
     if (dest_reg->isPinned())
         completed_inst->setPinnedRegsWritten();
 
-    if (dest_reg->getNumPinnedWritesToComplete() != 0) {
-        DPRINTF(IQ, "Reg %d [%s] is pinned, skipping\n",
-                dest_reg->index(), dest_reg->className());
+    if (dest_reg->getNumPinnedWritesToComplete() > 0) {
+        DPRINTF(IQ, "Reg %d [%s] is pinned (NumPinnedWritesToComplete=%i), skipping.\n",
+                dest_reg->index(), dest_reg->className(),
+                dest_reg->getNumPinnedWritesToComplete());
         return 0;
     }
 

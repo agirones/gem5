@@ -49,6 +49,7 @@
 #include "base/cprintf.hh"
 #include "base/debug.hh"
 #include "base/intmath.hh"
+#include "base/trace.hh"
 #include "base/types.hh"
 #include "debug/InvalidReg.hh"
 
@@ -484,6 +485,10 @@ class PhysRegId : private RegId
         // may be required in case of a mem access order violation).
         pinned = (numWrites != 0);
         numPinnedWrites = numWrites;
+        if (pinned)
+            DPRINTFN("Reg: %i (%s) is being pinned.\n",
+                    flatIndex(), className()); 
+
     }
 
     void decrNumPinnedWrites() { --numPinnedWrites; }

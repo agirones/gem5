@@ -334,6 +334,10 @@ DynInst::setSquashed()
     // that they are in a consistent state for a possible re-rename. This also
     // ensures that dest regs will be pinned to the same phys register if
     // re-rename happens.
+    DPRINTF(DynInst,
+        "DynInst: [sn:%lli] setSquashed. isPinnedRegsRenamed=\n",
+        seqNum, isPinnedRegsRenamed(), cpu->instcount);
+
     for (int idx = 0; idx < numDestRegs(); idx++) {
         PhysRegIdPtr phys_dest_reg = renamedDestIdx(idx);
         if (phys_dest_reg->isPinned()) {
@@ -341,6 +345,11 @@ DynInst::setSquashed()
             if (isPinnedRegsWritten())
                 phys_dest_reg->incrNumPinnedWritesToComplete();
         }
+        DPRINTF(DynInst, "DynInst: [sn:%llu] has dest reg %i (%s) and it's %s pinned and it is %s pinnedRegsWritten.\n",
+                seqNum, phys_dest_reg->flatIndex(),
+                phys_dest_reg->className(), 
+                (phys_dest_reg->isPinned() == 1) ? "" : "not",
+                (isPinnedRegsWritten() == 1) ? "" : "not");
     }
     setPinnedRegsSquashDone();
 }

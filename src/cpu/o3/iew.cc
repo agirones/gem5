@@ -1268,6 +1268,10 @@ IEW::dispatchInsts(ThreadID tid)
         DPRINTF(IEW, "[tid:%i] Issue: Adding PC %s [sn:%lli] [tid:%i] to "
                 "IQ.\n",
                 tid, inst->pcState(), inst->seqNum, inst->threadNumber);
+        DPRINTF(IEW, "Instruction: [sn:%llu], Type=%s, Name=%s\n",
+                inst->seqNum, // or inst->instAddr()
+                inst->opClass(), // Gets the instruction class (e.g., MemRead, IntAlu)
+                inst->staticInst->disassemble(inst->pcState().instAddr()));
 
         // Be sure to mark these instructions as ready so that the
         // commit stage can go ahead and execute them, and mark
@@ -1914,7 +1918,7 @@ IEW::writebackInsts()
     // Either have IEW have direct access to scoreboard, or have this
     // as part of backwards communication.
 
-    const int dependentsThreshold = -1;
+    const int dependentsThreshold = 0;
     int num_non_ready_operands_iq = instQueue.getNumNonReadyOperands();
 
     for (int inst_num = 0; inst_num < wbWidth &&

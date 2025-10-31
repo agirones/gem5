@@ -341,6 +341,10 @@ class Commit
     /** ROB interface. */
     ROB *rob;
 
+    /** To stop simulation if nothing commits for too long. */
+    uint64_t noCommitCounter;
+    uint64_t noCommitThreashold = 50000;
+
   private:
     /** Pointer to O3CPU. */
     CPU *cpu;
