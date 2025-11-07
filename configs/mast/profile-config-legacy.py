@@ -110,30 +110,33 @@ def config_system(system):
 #        for fupool in cpu.fuPool.FUList:
 #            fupool.count = 8
         
-        fu_list = cpu.fuPool.FUList[0].count = 5 # IntAlu
-        fu_list = cpu.fuPool.FUList[1].count = 3 # IntMultDiv
-        fu_list = cpu.fuPool.FUList[4].count = 3 # ReadPort
-        fu_list = cpu.fuPool.FUList[5].count = 2 # SIMD_Unit
-        fu_list = cpu.fuPool.FUList[7].count = 2 # PredALU
-        fu_list = cpu.fuPool.FUList[8].count = 0 # WritePort
+        fu_list = cpu.fuPool.FUList[0].count = 8 # IntAlu
+        fu_list = cpu.fuPool.FUList[1].count = 2 # IntMultDiv
+        fu_list = cpu.fuPool.FUList[3].count = 3 # ReadPort
+        fu_list = cpu.fuPool.FUList[4].count = 2 # SIMD_Unit
+        fu_list = cpu.fuPool.FUList[6].count = 2 # PredALU
+        fu_list = cpu.fuPool.FUList[7].count = 0 # WritePort
 
-        cpu.fetchWidth = args.cpu_width
-        cpu.decodeWidth = args.cpu_width
-        cpu.renameWidth = args.cpu_width
-        cpu.dispatchWidth = args.cpu_width
-        cpu.issueWidth = args.cpu_width
+        cpu.fetchWidth = 10
+        cpu.decodeWidth = 10
+        cpu.renameWidth = 10
+        cpu.dispatchWidth = 10
+        cpu.issueWidth = 12
         cpu.wbWidth = 12
-        cpu.commitWidth = args.cpu_width
+        cpu.commitWidth = 12
 
-        cpu.numIQEntries = 205
-        cpu.numPhysFloatRegs = 332
-        cpu.numPhysIntRegs = 280
-        cpu.numROBEntries = 512
-        cpu.LQEntries = 192
-        cpu.SQEntries = 114
+        cpu.numIQEntries = 256
+        cpu.numPhysFloatRegs = 630
+        cpu.numPhysIntRegs = 630
+        cpu.numROBEntries = 630
+        cpu.LQEntries = 256
+        cpu.SQEntries = 256
 
         cpu.backComSize = 30
         cpu.forwardComSize = 512
+
+        cpu.branchPred.btb.numEntries = 8192
+        cpu.branchPred.btb.associativity = 4
 
 
 #test_sys.init_param = args.init_param

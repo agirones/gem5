@@ -1918,7 +1918,7 @@ IEW::writebackInsts()
     // Either have IEW have direct access to scoreboard, or have this
     // as part of backwards communication.
 
-    const int dependentsThreshold = 0;
+    const int dependentsThreshold = 1;
     int num_non_ready_operands_iq = instQueue.getNumNonReadyOperands();
 
     for (int inst_num = 0; inst_num < wbWidth &&
@@ -2024,7 +2024,7 @@ IEW::writebackInsts()
         ppToCommit->notify(inst);
     }
 
-    const int broadcastMax = 8;
+    const int broadcastMax = 12;
     int broadcastCount = 0;
 
     DPRINTF(SendCommit, "Processing the Broadcast Queue (%i), broadcastCount: %i.\n",

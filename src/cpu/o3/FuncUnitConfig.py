@@ -76,6 +76,20 @@ class FP_MultDiv(FUDesc):
     count = 2
 
 
+class FPU(FUDesc):
+    opList = [
+        OpDesc(opClass="FloatAdd", opLat=2),
+        OpDesc(opClass="FloatCmp", opLat=2),
+        OpDesc(opClass="FloatCvt", opLat=2),
+        OpDesc(opClass="FloatMult", opLat=4),
+        OpDesc(opClass="FloatMultAcc", opLat=5),
+        OpDesc(opClass="FloatMisc", opLat=3),
+        OpDesc(opClass="FloatDiv", opLat=12, pipelined=False),
+        OpDesc(opClass="FloatSqrt", opLat=24, pipelined=False),
+    ]
+    count = 4
+
+
 class SIMD_Unit(FUDesc):
     opList = [
         OpDesc(opClass="SimdAdd"),

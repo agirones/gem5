@@ -1741,7 +1741,6 @@ InstructionQueue::addToDependents(const DynInstPtr &new_inst)
                     new_inst->pcState());
     DPRINTF(IQDEP, "There are %u non-ready source operands in the IQ.\n",
                     getNumNonReadyOperands());
-    assert(getNumNonReadyOperands() < 610);
 
     return return_val;
 }
