@@ -315,6 +315,8 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
              "Number of unique instructions that woke up an instruction"),
     ADD_STAT(wakeupBaselineComparisons, statistics::units::Count::get(),
              "Total number of comparisons in the IQ during wakeup in the baseline"),
+    ADD_STAT(wakeupNecessaryComparisons, statistics::units::Count::get(),
+             "Number of strictly necessary comparisons in the IQ during wakeup"),
     ADD_STAT(broadcastProposalComparisons, statistics::units::Count::get(),
              "Total number of comparisons in the IQ during wakeup in the broadcast proposal"),
     ADD_STAT(wakeupMicroopDestOperands, statistics::units::Count::get(),
@@ -342,7 +344,17 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     ADD_STAT(wakeup2Dependent, statistics::units::Count::get(),
              "Number of destination registers with two dependents in the IQ encountered during wake up."),
     ADD_STAT(wakeup3OrMoreDependent, statistics::units::Count::get(),
-             "Number of destination registers with three or more dependents in the IQ encountered during wake up.")
+             "Number of destination registers with three or more dependents in the IQ encountered during wake up."),
+    ADD_STAT(broadcastsPerWakeUpCycle, statistics::units::Count::get(),
+             "Histogram of how many broadcast happen each Wake Up cycle."),
+    ADD_STAT(broadcastsPerWakeUpCycleExcept0, statistics::units::Count::get(),
+             "Histogram of how many broadcast happen each Wake Up cycle, excluding instructions that wake up 0 source operands in the IQ."),
+    ADD_STAT(broadcastsPerWakeUpCycleExcept01, statistics::units::Count::get(),
+             "Histogram of how many broadcast happen each Wake Up cycle, excluding instructions that wake up 0 or 1 source operands in the IQ."),
+    ADD_STAT(broadcastsPerWakeUpCycleExcept012, statistics::units::Count::get(),
+             "Histogram of how many broadcast happen each Wake Up cycle, excluding instructions that wake up 0, 1, or 2 source operands in the IQ."),
+    ADD_STAT(wakeupDependents, statistics::units::Count::get(),
+             "Histogram of the number of source operands each produced value wakes up.")
 {
     instsToCommit
         .init(cpu->numThreads)
@@ -584,6 +596,9 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     wakeupBaselineComparisons
         .flags(statistics::total);
 
+    wakeupNecessaryComparisons
+        .flags(statistics::total);
+
     broadcastProposalComparisons
         .flags(statistics::total);
 
@@ -610,6 +625,32 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     wakeupBroadcastRegsPerInst
         .init(0,8,1)
         .flags(statistics::pdf);
+
+    broadcastsPerWakeUpCycle
+        .init(0,13,1)
+        .flags(statistics::pdf);
+
+    broadcastsPerWakeUpCycleExcept0
+        .init(0,13,1)
+        .flags(statistics::pdf);
+
+    broadcastsPerWakeUpCycleExcept01
+        .init(0,13,1)
+        .flags(statistics::pdf);
+
+    broadcastsPerWakeUpCycleExcept012
+        .init(0,13,1)
+        .flags(statistics::pdf);
+
+    wakeupDependents
+        .init(6)
+        .subname(0, "0")
+        .subname(1, "1")
+        .subname(2, "2")
+        .subname(3, "3_or_more")
+        .subname(4, "0_store")
+        .subname(5, "0_branch")
+        .flags(statistics::total | statistics::pdf);
 }
 
 IEW::IEWStats::ExecutedInstStats::ExecutedInstStats(CPU *cpu)
@@ -1918,7 +1959,7 @@ IEW::writebackInsts()
     // Either have IEW have direct access to scoreboard, or have this
     // as part of backwards communication.
 
-    const int dependentsThreshold = 1;
+    const int dependentsThreshold = -1;
     int num_non_ready_operands_iq = instQueue.getNumNonReadyOperands();
 
     for (int inst_num = 0; inst_num < wbWidth &&
@@ -1952,8 +1993,10 @@ IEW::writebackInsts()
                 iewStats.wakeup0DestRegs++;
                 if (inst->isStore()){
                     iewStats.wakeupStore0DestRegs++;
+                    iewStats.wakeupDependents[4]++;
                 } else if (inst->isControl()){
                     iewStats.wakeupBranch0DestRegs++;
+                    iewStats.wakeupDependents[5]++;
                 }
             } else {
                 iewStats.wakeupAnyDestRegs++;
@@ -2013,6 +2056,7 @@ IEW::writebackInsts()
                             type != CCRegClass &&
                             type != MiscRegClass){
                             iewStats.wakeupBaselineComparisons += num_non_ready_operands_iq;
+                            iewStats.wakeupNecessaryComparisons += numDependents;
                         }
                     }
                 }
@@ -2026,6 +2070,9 @@ IEW::writebackInsts()
 
     const int broadcastMax = 12;
     int broadcastCount = 0;
+    int broadcastCountExcept0 = 0;
+    int broadcastCountExcept01 = 0;
+    int broadcastCountExcept012 = 0;
 
     DPRINTF(SendCommit, "Processing the Broadcast Queue (%i), broadcastCount: %i.\n",
             broadcastQueue.size(), broadcastCount);
@@ -2050,6 +2097,7 @@ IEW::writebackInsts()
                 dest_reg->flatIndex(), dest_reg->className(), inst->seqNum);
         if (!inst->isSquashed() && inst->isExecuted() &&
                 inst->getFault() == NoFault) {
+            int numDependents = instQueue.numRegDependents(dest_reg);
             instQueue.wakeRegDependents(inst, dest_reg);
 
             // Mark register as ready if not pinned
@@ -2065,11 +2113,31 @@ IEW::writebackInsts()
                 type != MiscRegClass){
                 broadcastCount++;
                 iewStats.wakeupBaselineComparisons += num_non_ready_operands_iq;
+                iewStats.wakeupNecessaryComparisons += numDependents;
                 iewStats.iqOccupancyHist.sample(num_non_ready_operands_iq);
+                if(numDependents >= 3){
+                    iewStats.wakeupDependents[3]++;
+                } else {
+                    iewStats.wakeupDependents[numDependents]++;
+                }
+                if (numDependents == 1) {
+                    ++broadcastCountExcept0;
+                } else if (numDependents == 2) {
+                    ++broadcastCountExcept0;
+                    ++broadcastCountExcept01;
+                } else {
+                    ++broadcastCountExcept0;
+                    ++broadcastCountExcept01;
+                    ++broadcastCountExcept012;
+                }
             }
         }
         broadcastQueue.pop();
     }
+    iewStats.broadcastsPerWakeUpCycle.sample(broadcastCount);
+    iewStats.broadcastsPerWakeUpCycleExcept0.sample(broadcastCountExcept0);
+    iewStats.broadcastsPerWakeUpCycleExcept01.sample(broadcastCountExcept01);
+    iewStats.broadcastsPerWakeUpCycleExcept012.sample(broadcastCountExcept012);
 }
 
 void

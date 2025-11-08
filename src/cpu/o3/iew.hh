@@ -604,6 +604,8 @@ class IEW
         statistics::Vector numUniqueWakers;
         /* Total number of comparisons in the IQ during wakeup in the baseline. */
         statistics::Scalar wakeupBaselineComparisons;
+        /* Number of strictly necessary comparisons in the IQ during wakeup. */
+        statistics::Scalar wakeupNecessaryComparisons;
         /* Total number of comparisons in the IQ during wakeup in the broadcast proposal. */
         statistics::Scalar broadcastProposalComparisons;
         /* Histogram of destination operands for micro-ops during wakeup. */
@@ -632,6 +634,16 @@ class IEW
         statistics::Scalar wakeup2Dependent;
         /** Number of destination registers with three or more dependents in the IQ encountered during wake up.*/
         statistics::Scalar wakeup3OrMoreDependent;
+        /** Histogram of how many broadcast happen each Wake Up cycle.*/
+        statistics::Distribution broadcastsPerWakeUpCycle;
+        /** Histogram of how many broadcast happen each Wake Up cycle, excluding instructions that wake up 0 source operands in the IQ.*/
+        statistics::Distribution broadcastsPerWakeUpCycleExcept0;
+        /** Histogram of how many broadcast happen each Wake Up cycle, excluding instructions that wake up 0 or 1 source operands in the IQ.*/
+        statistics::Distribution broadcastsPerWakeUpCycleExcept01;
+        /** Histogram of how many broadcast happen each Wake Up cycle, excluding instructions that wake up 0, 1, or 2 source operands in the IQ.*/
+        statistics::Distribution broadcastsPerWakeUpCycleExcept012;
+        /** Histogram of the number of source operands each produced value wakes up. */
+        statistics::Vector wakeupDependents;
     } iewStats;
 };
 
