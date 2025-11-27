@@ -423,6 +423,8 @@ class IEW
     /** Maximum size of the skid buffer. */
     unsigned skidBufferMax;
 
+    int broadcastMax;
+    int dependentsThreshold;
 
     struct IEWStats : public statistics::Group
     {
@@ -644,6 +646,12 @@ class IEW
         statistics::Distribution broadcastsPerWakeUpCycleExcept012;
         /** Histogram of the number of source operands each produced value wakes up. */
         statistics::Vector wakeupDependents;
+        /** Count of number of precisse wake ups. */
+        statistics::Scalar precisseWakeUp;
+        /* Count of number of broadcast wake ups. */
+        statistics:: Scalar broadcastWakeUp;
+        /* Count of number of broadcast the same cycle that finish execution. */
+        statistics::Scalar sameCycleBroadcast;
     } iewStats;
 };
 

@@ -93,7 +93,9 @@ IEW::IEW(CPU *_cpu, const BaseO3CPUParams &params)
       wbCycle(0),
       wbWidth(params.wbWidth),
       numThreads(params.numThreads),
-      iewStats(cpu, params)
+      iewStats(cpu, params),
+      broadcastMax(params.broadcastMax),
+      dependentsThreshold(params.dependentsThreshold)
 {
     if (dispatchWidth > MaxWidth)
         fatal("dispatchWidth (%d) is larger than compiled limit (%d),\n"

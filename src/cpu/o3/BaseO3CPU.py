@@ -173,6 +173,9 @@ class BaseO3CPU(BaseCPU):
     numIQEntries = Param.Unsigned(64, "Number of instruction queue entries")
     numROBEntries = Param.Unsigned(352, "Number of reorder buffer entries")
 
+    broadcastMax = Param.Int(12, "Number of wake up broadcast ports in the IQ")
+    dependentsThreshold = Param.Int(-1, "Threshold of number of dependents in the IQ to do a precise wake up")
+
     smtNumFetchingThreads = Param.Unsigned(1, "SMT Number of Fetching Threads")
     smtFetchPolicy = Param.SMTFetchPolicy("RoundRobin", "SMT Fetch policy")
     smtLSQPolicy = Param.SMTQueuePolicy(

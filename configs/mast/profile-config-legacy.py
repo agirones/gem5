@@ -138,6 +138,9 @@ def config_system(system):
         cpu.branchPred.btb.numEntries = 8192
         cpu.branchPred.btb.associativity = 4
 
+        cpu.broadcastMax = 2
+        cpu.dependentsThreshold = 5
+
 
 #test_sys.init_param = args.init_param
 def config_cache(system):
