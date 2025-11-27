@@ -1,0 +1,15 @@
+Running debug simulation for benchmark 11 with CPU width 4...
+Global frequency set at 1000000000000 ticks per second
+      0: system.pc.south_bridge.cmos.rtc: Real-time clock set to Sun Jan  1 00:00:00 2012
+gem5 Simulator System.  https://www.gem5.org
+gem5 is copyrighted software; use the --copyright option for details.
+
+gem5 version 24.1.0.1
+gem5 compiled Jun 11 2025 11:46:23
+gem5 started Jun 19 2025 10:50:26
+gem5 executing on idun-04-34, pid 162635
+command line: /cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/build/X86/gem5.opt /cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/configs/mast/profile-config-legacy.py --benchmark-num 11 --mode simrun --simpoint-num 0 --cpu-width 4 --run-base-dir /cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/runs/output
+
+info: Standard input is not a terminal, disabling listeners.
+**** REAL SIMULATION ****
+Warmed up! Dumping and resetting stats!
