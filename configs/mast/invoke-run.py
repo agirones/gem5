@@ -9,6 +9,12 @@ from benchmarks import ALL_BENCHMARKS
 
 #We have to do it like this cause invoking ./build/X86/gem5.opt config
 #automatically makes the m5 folder before we are ready
+
+def int_or_default(value, default_val):
+    if value == "" or value is None:
+        return default_val
+    return int(value)
+
 parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
@@ -76,7 +82,7 @@ parser.add_argument(
 
 parser.add_argument(
     "--iq-size",
-    type=int,
+    type=lambda x: int_or_default(x, 256),
     required=False,
     default=256,
     help="Sets the size of the IQ."
