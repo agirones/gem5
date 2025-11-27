@@ -652,6 +652,8 @@ class IEW
         statistics:: Scalar broadcastWakeUp;
         /* Count of number of broadcast the same cycle that finish execution. */
         statistics::Scalar sameCycleBroadcast;
+        /* Histogram of how many precisse wake up occur per cycle. */
+        statistics::Distribution precisseWakeUpHistogram;
     } iewStats;
 };
 

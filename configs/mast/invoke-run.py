@@ -58,6 +58,30 @@ parser.add_argument(
     help="The checkpoint that would be executed."
 )
 
+parser.add_argument(
+    "--broadcastMax",
+    type=int,
+    required=False,
+    default=12,
+    help="The maximum number of broadcast in the IQ in one cycle."
+)
+
+parser.add_argument(
+    "--dependentsThreshold",
+    type=int,
+    required=False,
+    default=-1,
+    help="The threshold of dependents so if it's higher, the instuction broadcasts when during wake up."
+)
+
+parser.add_argument(
+    "--iq-size",
+    type=int,
+    required=False,
+    default=256,
+    help="Sets the size of the IQ."
+)
+
 args = parser.parse_args()
 
 
@@ -161,5 +185,9 @@ for i in range(len(cpts)):
                     "--mode", args.mode,
                     "--simpoint-num", str(i),
                     "--cpu-width", str(args.cpu_width),
-                    "--run-base-dir", args.output_dir])
+                    "--run-base-dir", args.output_dir,
+                    "--broadcastMax", str(args.broadcastMax),
+                    "--dependentsThreshold", str(args.dependentsThreshold),
+                    "--iq-size", str(args.iq_size),
+                    ])
     cleanup()

@@ -75,6 +75,30 @@ parser.add_argument(
     help="Base directory for simulation runs (e.g., 'my_sims' or 'data/runs')"
 )
 
+parser.add_argument(
+    "--broadcastMax",
+    type=int,
+    required=False,
+    default=12,
+    help="The maximum number of broadcast in the IQ in one cycle."
+)
+
+parser.add_argument(
+    "--dependentsThreshold",
+    type=int,
+    required=False,
+    default=-1,
+    help="The threshold of dependents so if it's higher, the instuction broadcasts when during wake up."
+)
+
+parser.add_argument(
+    "--iq-size",
+    type=int,
+    required=False,
+    default=256,
+    help="Sets the size of the IQ."
+)
+
 args = parser.parse_args()
 
 benchmark = ALL_BENCHMARKS[args.benchmark_num]
@@ -125,7 +149,7 @@ def config_system(system):
         cpu.wbWidth = 12
         cpu.commitWidth = 12
 
-        cpu.numIQEntries = 256
+        cpu.numIQEntries = args.iq_size
         cpu.numPhysFloatRegs = 630
         cpu.numPhysIntRegs = 630
         cpu.numROBEntries = 630
@@ -138,8 +162,8 @@ def config_system(system):
         cpu.branchPred.btb.numEntries = 8192
         cpu.branchPred.btb.associativity = 4
 
-        cpu.broadcastMax = 2
-        cpu.dependentsThreshold = 5
+        cpu.broadcastMax = args.broadcastMax
+        cpu.dependentsThreshold = args.dependentsThreshold
 
 
 #test_sys.init_param = args.init_param
