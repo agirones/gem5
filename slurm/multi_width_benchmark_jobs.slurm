@@ -26,6 +26,7 @@ GEM5_CONFIG="${GEM5_ROOT}/configs/mast/profile-config-legacy.py"
 BENCHMARK_NUM=$((SLURM_ARRAY_TASK_ID % NUM_BENCHMARKS))
 CPU_WIDTH=$((8 - (SLURM_ARRAY_TASK_ID / NUM_BENCHMARKS)))
 
+export LMOD_DISABLE_SAME_NAME_AUTOSWAP="no"
 module load Python/3.12.3-GCCcore-13.3.0
 
 cd "${GEM5_ROOT}"
