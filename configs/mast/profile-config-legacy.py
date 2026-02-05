@@ -12,7 +12,7 @@ from m5.util import (
 
 from gem5.isas import ISA 
 
-addToPath("../")
+addToPath("/cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/configs")
 
 from common import (
     MemConfig,
@@ -32,6 +32,8 @@ from m5.objects.Prefetcher import (
     DCPTPrefetcher,
     StridePrefetcher
 )
+
+addToPath("/cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/configs/mast")
 
 from benchmarks import ALL_BENCHMARKS
 
@@ -99,6 +101,22 @@ parser.add_argument(
     help="Sets the size of the IQ."
 )
 
+parser.add_argument(
+    "--lq-size",
+    type=int,
+    required=False,
+    default=256,
+    help="Sets the size of the LQ."
+)
+
+parser.add_argument(
+    "--sq-size",
+    type=int,
+    required=False,
+    default=256,
+    help="Sets the size of the SQ."
+)
+
 args = parser.parse_args()
 
 benchmark = ALL_BENCHMARKS[args.benchmark_num]
@@ -153,8 +171,8 @@ def config_system(system):
         cpu.numPhysFloatRegs = 630
         cpu.numPhysIntRegs = 630
         cpu.numROBEntries = 630
-        cpu.LQEntries = 256
-        cpu.SQEntries = 256
+        cpu.LQEntries = args.lq_size
+        cpu.SQEntries = args.sq_size
 
         cpu.backComSize = 30
         cpu.forwardComSize = 512
@@ -383,6 +401,7 @@ test_sys.cpu = [
     TestCPUClass(clk_domain=test_sys.cpu_clk_domain, cpu_id=i)
     for i in range(num_cpus)
 ]
+
 bpClass = ObjectList.bp_list.get("MultiperspectivePerceptronTAGE64KB")
 test_sys.cpu[0].branchPred = bpClass()
 

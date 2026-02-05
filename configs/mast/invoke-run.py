@@ -88,6 +88,22 @@ parser.add_argument(
     help="Sets the size of the IQ."
 )
 
+parser.add_argument(
+    "--lq-size",
+    type=lambda x: int_or_default(x, 256),
+    required=False,
+    default=256,
+    help="Sets the size of the LQ."
+)
+
+parser.add_argument(
+    "--sq-size",
+    type=lambda x: int_or_default(x, 256),
+    required=False,
+    default=256,
+    help="Sets the size of the SQ."
+)
+
 args = parser.parse_args()
 
 
@@ -195,5 +211,7 @@ for i in range(len(cpts)):
                     "--broadcastMax", str(args.broadcastMax),
                     "--dependentsThreshold", str(args.dependentsThreshold),
                     "--iq-size", str(args.iq_size),
+                    "--lq-size", str(args.lq_size),
+                    "--sq-size", str(args.sq_size),
                     ])
     cleanup()
