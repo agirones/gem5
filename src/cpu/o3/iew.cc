@@ -169,6 +169,8 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
              "Number of cycles IEW is blocking"),
     ADD_STAT(unblockCycles, statistics::units::Cycle::get(),
              "Number of cycles IEW is unblocking"),
+    ADD_STAT(blockIQCycles, statistics::units::Cycle::get(),
+             "Number of cycles IEW is blocking because the IQ is full"),
     ADD_STAT(dispatchedInsts, statistics::units::Count::get(),
              "Number of instructions dispatched to IQ"),
     ADD_STAT(dispSquashedInsts, statistics::units::Count::get(),
@@ -924,6 +926,10 @@ IEW::block(ThreadID tid)
         wroteToTimeBuffer = true;
     }
 
+    if (instQueue.isFull(tid)) {
+        blocked_bc_iq_full = true;
+    }
+
     // Add the current inputs to the skid buffer so they can be
     // reprocessed when this stage unblocks.
     skidInsert(tid);
@@ -945,6 +951,8 @@ IEW::unblock(ThreadID tid)
         DPRINTF(IEW, "[tid:%i] Done unblocking.\n",tid);
         dispatchStatus[tid] = Running;
     }
+
+    blocked_bc_iq_full = false;
 }
 
 void
@@ -1254,7 +1262,9 @@ IEW::dispatch(ThreadID tid)
 
     if (dispatchStatus[tid] == Blocked) {
         ++iewStats.blockCycles;
-
+        if (blocked_bc_iq_full) {
+            ++iewStats.blockIQCycles;
+        }
     } else if (dispatchStatus[tid] == Squashing) {
         ++iewStats.squashCycles;
     }
@@ -1360,6 +1370,7 @@ IEW::dispatchInsts(ThreadID tid)
 
             // Call function to start blocking.
             block(tid);
+            blocked_bc_iq_full = true;
 
             // Set unblock to false. Special case where we are using
             // skidbuffer (unblocking) instructions but then we still

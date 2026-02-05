@@ -500,6 +500,14 @@ class Commit
 
         /** ROB Occupancy when an instruction is inserted to the ROB. */
         statistics::Distribution robOccupancy;
+
+        /** Number of mispredicted branches that committed. */
+        statistics::Scalar committedMispredictedBranch;
+
+        /** Number of times a squash was triggered because a memory order violation was detected. */
+        statistics::Scalar memoryOrderViolationSquashes;
+        /** Number of times a squash was triggered because a branch misprediction was detected. */
+        statistics::Scalar branchMispredictionSquashes;
     } stats;
 
 };

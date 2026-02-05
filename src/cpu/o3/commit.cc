@@ -170,8 +170,13 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit, const BaseO3CPUParams
       ADD_STAT(commitEligibleSamples, statistics::units::Cycle::get(),
                "number cycles where commit BW limit reached"),
       ADD_STAT(robOccupancy, statistics::units::Count::get(),
-               "ROB Occupancy when an instruction is inserted to the ROB")
-
+               "ROB Occupancy when an instruction is inserted to the ROB"),
+      ADD_STAT(committedMispredictedBranch, statistics::units::Count::get(),
+               "Number of mispredicted branches that committed"),
+      ADD_STAT(memoryOrderViolationSquashes, statistics::units::Count::get(),
+               "Number of times a squash was triggered because a memory order violation was detected"),
+      ADD_STAT(branchMispredictionSquashes, statistics::units::Count::get(),
+               "Number of times a squash was triggered because a branch misprediction was detected")
 {
     using namespace statistics;
 
@@ -804,10 +809,12 @@ Commit::commit()
                     tid,
                     fromIEW->mispredictInst[tid]->pcState().instAddr(),
                     fromIEW->squashedSeqNum[tid]);
+                ++stats.branchMispredictionSquashes;
             } else {
                 DPRINTF(Commit,
                     "[tid:%i] Squashing due to order violation [sn:%llu]\n",
                     tid, fromIEW->squashedSeqNum[tid]);
+                ++stats.memoryOrderViolationSquashes;
             }
 
             DPRINTF(Commit, "[tid:%i] Redirecting to PC %#x\n",
@@ -1104,6 +1111,10 @@ Commit::commitInsts()
                 if (!interrupt && avoidQuiesceLiveLock &&
                     onInstBoundary && cpu->checkInterrupts(0))
                     squashAfter(tid, head_inst);
+
+                if (head_inst->mispredicted()) {
+                    ++stats.committedMispredictedBranch;
+                }
             } else {
                 DPRINTF(Commit, "Unable to commit head instruction PC:%s "
                         "[tid:%i] [sn:%llu].\n",

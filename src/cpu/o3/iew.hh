@@ -120,6 +120,8 @@ class IEW
     /** Writeback status. */
     StageStatus wbStatus;
 
+    bool blocked_bc_iq_full;
+
     /** Probe points. */
     ProbePointArg<DynInstPtr> *ppMispredict;
     ProbePointArg<DynInstPtr> *ppDispatch;
@@ -449,6 +451,8 @@ class IEW
         statistics::Scalar blockCycles;
         /** Stat for total number of unblocking cycles. */
         statistics::Scalar unblockCycles;
+        /** Stat for total number of squashed instructions dispatch skips. */
+        statistics::Scalar blockIQCycles;
         /** Stat for total number of instructions dispatched. */
         statistics::Scalar dispatchedInsts;
         /** Stat for total number of squashed instructions dispatch skips. */
