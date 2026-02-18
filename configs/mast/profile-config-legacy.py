@@ -12,7 +12,10 @@ from m5.util import (
 
 from gem5.isas import ISA 
 
-addToPath("/cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/configs")
+current_dir = os.path.dirname(os.path.abspath(__file__))
+configs_dir = os.path.abspath(os.path.join(current_dir, ".."))
+addToPath(current_dir)
+addToPath(configs_dir)
 
 from common import (
     MemConfig,
@@ -32,8 +35,6 @@ from m5.objects.Prefetcher import (
     DCPTPrefetcher,
     StridePrefetcher
 )
-
-addToPath("/cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/configs/mast")
 
 from benchmarks import ALL_BENCHMARKS
 
@@ -129,9 +130,9 @@ if args.run_base_dir == "_default_run_dir_runs":
 
 checkpoints = f"{root}/runs/legacy-checkpoints"
 simpoints_dir = f"/cluster/projects/mast/simpoints/simpoints"
-simpoint_cpt_dir = "/cluster/projects/mast/checkpoints/simpoint-checkpoints"
+simpoint_cpt_dir = os.getenv("GEM5_CPTS", "/cluster/projects/mast/checkpoints/simpoint-checkpoints")
 
-disk_image = "/cluster/projects/mast/full-system/disk-images/x86-ubuntu-with-spec17"
+disk_image = os.getenv("GEM5_DISK", "/cluster/projects/mast/full-system/disk-images/x86-ubuntu-with-spec17")
 root_device = "/dev/sda2"
 mem_size = "16GiB"
 os_type = "linux"
@@ -144,7 +145,7 @@ kernel_cmd = " ".join([
     "no_systemd=true"
 ])
 
-kernel = "/cluster/projects/mast/full-system/kernels/x86-linux-kernel-5.4.0-105-generic"
+kernel = os.getenv("GEM5_KERNEL", "/cluster/projects/mast/full-system/kernels/x86-linux-kernel-5.4.0-105-generic")
 
 
 def config_system(system):

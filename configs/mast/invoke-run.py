@@ -38,6 +38,7 @@ parser.add_argument(
     "--cpu-width",
     type=int,
     required=False,
+    default=8,
     help="Width for the backend of the processor: decode, rename, dispatch, issue, wb and commit."
 )
 
@@ -104,12 +105,22 @@ parser.add_argument(
     help="Sets the size of the SQ."
 )
 
+parser.add_argument(
+    "--gdb",
+    action="store_true",
+    help="Run the simulation inside GDB for debugging"
+)
+
 args = parser.parse_args()
 
 
 benchmark = ALL_BENCHMARKS[args.benchmark_num]
 
-root = os.getcwd()
+root = os.getenv('GEM5_ROOT', os.getcwd())
+
+cpt_default = "/cluster/projects/mast/checkpoints/simpoint-checkpoints"
+cpt_base = os.getenv("GEM5_CPTS", cpt_default)
+simpoint_cpt_dir = f"{cpt_base}/{benchmark.name}-cpt"
 
 if args.config == "_default_config":
     args.config = f"{root}/configs/mast/profile-config-legacy.py"
@@ -134,7 +145,6 @@ def setup_cpt_dir(cpt):
 
 if args.mode == "cpt":
     print("Running in cpt mode.")
-    simpoint_cpt_dir = "/cluster/projects/mast/checkpoints/simpoint-checkpoints"
     cpts = os.listdir(f"{simpoint_cpt_dir}/{benchmark.name}-cpt")
     cpts.sort()
     #assert(len(cpts) > 0)
@@ -181,7 +191,7 @@ if not args.mode == "simrun":
 # gem5 can't reinstantiate with new checkpoints
 # so when we want to do a simpoint run, we have to manage 
 # each of the checkpoints individually, which takes some effort
-simpoint_cpt_dir = "/cluster/projects/mast/checkpoints/simpoint-checkpoints"
+simpoint_cpt_dir = os.getenv("GEM5_CPTS", "/cluster/projects/mast/checkpoints/simpoint-checkpoints")
 cpts = os.listdir(f"{simpoint_cpt_dir}/{benchmark.name}-cpt")
 cpts.sort()
 #assert(len(cpts) > 0)
@@ -191,27 +201,27 @@ setup_run_dir()
 for i in range(len(cpts)):
     cpt = cpts[i]
     setup_cpt_dir(cpt)
-    subprocess.run([f"{root}/build/X86/gem5.opt",
-#                    "--debug-flags=O3PipeView",
-#                    "--debug-flags=IEW",
-#                    "--debug-flags=IQ",
-#                    "--debug-flags=IQDEP",
-#                    "--debug-flags=RegIndex",
-#                    "--debug-flags=DebugSF",
-#                    "--debug-file=trace.out",
-#                    "--debug-flags=CommitP",
-#                    "--debug-start=1342141375473",
-#                    "--debug-end=1464957618957",
-                    f"{args.config}",
-                    "--benchmark-num", str(args.benchmark_num),
-                    "--mode", args.mode,
-                    "--simpoint-num", str(i),
-                    "--cpu-width", str(args.cpu_width),
-                    "--run-base-dir", args.output_dir,
-                    "--broadcastMax", str(args.broadcastMax),
-                    "--dependentsThreshold", str(args.dependentsThreshold),
-                    "--iq-size", str(args.iq_size),
-                    "--lq-size", str(args.lq_size),
-                    "--sq-size", str(args.sq_size),
-                    ])
+
+    binary_type = "gem5.debug" if args.gdb else "gem5.opt"
+    executable = f"{root}/build/X86/{binary_type}"
+
+    cmd = [executable]
+
+    if args.gdb:
+        cmd = ["gdb", "--args"] + cmd
+        # cmd.append("--debug-flags=IQ") # Uncomment if you want trace output in GDB
+
+    cmd.extend([
+        f"{args.config}",
+        "--benchmark-num", str(args.benchmark_num),
+        "--mode", args.mode,
+        "--simpoint-num", str(i),
+        "--cpu-width", str(args.cpu_width),
+        "--run-base-dir", args.output_dir,
+        "--iq-size", str(args.iq_size),
+        "--lq-size", str(args.lq_size),
+        "--sq-size", str(args.sq_size),
+    ])
+
+    subprocess.run(cmd)
     cleanup()
