@@ -3,6 +3,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import sys
 
 
 from benchmarks import ALL_BENCHMARKS
@@ -106,6 +107,15 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--simpoint-num",
+    type=int,
+    required=False,
+    default=None,
+    help="If specified, run only this single simpoint index. "
+         "Otherwise run all simpoints sequentially (legacy behaviour)."
+)
+
+parser.add_argument(
     "--gdb",
     action="store_true",
     help="Run the simulation inside GDB for debugging"
@@ -189,16 +199,25 @@ if not args.mode == "simrun":
     exit(0)
 
 # gem5 can't reinstantiate with new checkpoints
-# so when we want to do a simpoint run, we have to manage 
+# so when we want to do a simpoint run, we have to manage
 # each of the checkpoints individually, which takes some effort
 simpoint_cpt_dir = os.getenv("GEM5_CPTS", "/cluster/projects/mast/checkpoints/simpoint-checkpoints")
 cpts = os.listdir(f"{simpoint_cpt_dir}/{benchmark.name}-cpt")
 cpts.sort()
 #assert(len(cpts) > 0)
 
-setup_run_dir()
+if args.simpoint_num is not None:
+    # Single-simpoint mode: safe for parallel SLURM jobs.
+    # Do NOT rm -rf the whole benchmark dir; just ensure parent exists.
+    parent = f"{args.output_dir}/width{args.cpu_width}/{benchmark.name}"
+    os.makedirs(parent, exist_ok=True)
+    indices = [args.simpoint_num]
+else:
+    # Legacy: run all simpoints sequentially, clearing the benchmark dir first.
+    setup_run_dir()
+    indices = range(len(cpts))
 
-for i in range(len(cpts)):
+for i in indices:
     cpt = cpts[i]
     setup_cpt_dir(cpt)
 
@@ -223,5 +242,15 @@ for i in range(len(cpts)):
         "--sq-size", str(args.sq_size),
     ])
 
-    subprocess.run(cmd)
+    result = subprocess.run(cmd)
+    stats_path = os.path.join(os.getcwd(), "stats.txt")
+
+    if result.returncode != 0:
+        if os.path.exists(stats_path):
+            print(f"Warning: gem5 Segfaulted during teardown (Exit Code {result.returncode}).")
+            print(f"Success: {stats_path} exists. Proceeding to next task.")
+        else:
+            print(f"Critical Error: gem5 crashed and NO stats found at {stats_path}.")
+            sys.exit(1)
+
     cleanup()
