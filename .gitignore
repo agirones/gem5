@@ -36,6 +36,8 @@ configs/dram/lowp_sweep.cfg
 .vscode
 typings
 .DS_Store
-runs/
-!runs/scripts/
+runs/**
+!runs/**/scripts/
+!runs/**/scripts/**
 results/
+mast_gem5.sif

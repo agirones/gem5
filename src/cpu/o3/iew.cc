@@ -1535,9 +1535,18 @@ IEW::dispatchInsts(ThreadID tid)
         // Count non-ready source operands for all instructions actually
         // inserted into the IQ (regular, non-spec, or barrier), but not
         // for NOPs which are immediately marked as executed.
+        // Only int, float, and vector registers are counted; CC and misc
+        // (control) registers are excluded.
         if (iq_inserted) {
-            nonReadySrcOpsDispatchedThisCycle +=
-                inst->numSrcs() - inst->readyRegs;
+            for (int i = 0; i < inst->numSrcs(); ++i) {
+                if (!inst->readySrcIdx(i)) {
+                    RegClassType rc =
+                        inst->renamedSrcIdx(i)->classValue();
+                    if (rc == IntRegClass || rc == FloatRegClass || rc == VecRegClass) {
+                        nonReadySrcOpsDispatchedThisCycle++;
+                    }
+                }
+            }
         }
 
         insts_to_dispatch.pop();

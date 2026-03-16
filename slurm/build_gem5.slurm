@@ -7,9 +7,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=12GB
 
-export LMOD_DISABLE_SAME_NAME_AUTOSWAP="no"
-module load Python/3.12.3-GCCcore-13.3.0
-
+CONTAINER_PATH="/cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/mast_gem5.sif"
 GEM5_DIR=$1
 
 if [ -z "$GEM5_DIR" ]; then
@@ -18,4 +16,4 @@ if [ -z "$GEM5_DIR" ]; then
 fi
 
 cd "${GEM5_DIR}"
-scons -j $(nproc) build/X86/gem5.opt
+apptainer exec -B /cluster:/cluster "${CONTAINER_PATH}" scons -j $(nproc) build/X86/gem5.opt --ignore-style

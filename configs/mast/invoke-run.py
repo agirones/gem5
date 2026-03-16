@@ -135,6 +135,8 @@ simpoint_cpt_dir = f"{cpt_base}/{benchmark.name}-cpt"
 if args.config == "_default_config":
     args.config = f"{root}/configs/mast/profile-config-legacy.py"
 
+args.output_dir = os.path.abspath(args.output_dir)
+
 def setup_run_dir():
     tgt = f"{args.output_dir}/width{args.cpu_width}/{benchmark.name}"
     if os.path.exists(tgt):
@@ -217,6 +219,8 @@ else:
     setup_run_dir()
     indices = range(len(cpts))
 
+container_path = "/cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/mast_gem5.sif"
+
 for i in indices:
     cpt = cpts[i]
     setup_cpt_dir(cpt)
@@ -224,12 +228,12 @@ for i in indices:
     binary_type = "gem5.debug" if args.gdb else "gem5.opt"
     executable = f"{root}/build/X86/{binary_type}"
 
-    cmd = [executable]
+    cmd = ["apptainer", "exec", "-B", "/cluster:/cluster", container_path]
 
     if args.gdb:
-        cmd = ["gdb", "--args"] + cmd
-        # cmd.append("--debug-flags=IQ") # Uncomment if you want trace output in GDB
+        cmd.extend(["gdb", "--args"])
 
+    cmd.append(executable)
     cmd.extend([
         f"{args.config}",
         "--benchmark-num", str(args.benchmark_num),
