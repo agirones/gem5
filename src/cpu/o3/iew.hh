@@ -122,6 +122,11 @@ class IEW
 
     bool blocked_bc_iq_full;
 
+    /** Per-cycle accumulator: non-ready src operands dispatched to IQ this tick. */
+    int nonReadySrcOpsDispatchedThisCycle;
+    /** True if dispatchInsts() was called at least once this tick. */
+    bool dispatchActiveThisCycle;
+
     /** Probe points. */
     ProbePointArg<DynInstPtr> *ppMispredict;
     ProbePointArg<DynInstPtr> *ppDispatch;
@@ -658,6 +663,9 @@ class IEW
         statistics::Scalar sameCycleBroadcast;
         /* Histogram of how many precisse wake up occur per cycle. */
         statistics::Distribution precisseWakeUpHistogram;
+        /** Distribution of non-ready source operands dispatched to IQ per
+         *  active (non-stalled) cycle. */
+        statistics::Distribution nonReadySrcOpsDispatchedPerCycle;
     } iewStats;
 };
 

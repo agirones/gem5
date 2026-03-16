@@ -130,6 +130,9 @@ IEW::IEW(CPU *_cpu, const BaseO3CPUParams &params)
     skidBufferMax = (renameToIEWDelay + 1) * params.renameWidth;
 
     broadcastProposalComparisons = 0;
+
+    nonReadySrcOpsDispatchedThisCycle = 0;
+    dispatchActiveThisCycle = false;
 }
 
 std::string
@@ -366,7 +369,10 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     ADD_STAT(sameCycleBroadcast, statistics::units::Count::get(),
              "Count of number of broadcast the same cycle that finish execution."),
     ADD_STAT(precisseWakeUpHistogram, statistics::units::Count::get(),
-             "Histogram of how many precisse wake up occur per cycle.")
+             "Histogram of how many precisse wake up occur per cycle."),
+    ADD_STAT(nonReadySrcOpsDispatchedPerCycle, statistics::units::Count::get(),
+             "Distribution of non-ready source operands dispatched to the IQ "
+             "per active (non-stalled) cycle")
 {
     instsToCommit
         .init(cpu->numThreads)
@@ -667,6 +673,10 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
         .subname(4, "0_store")
         .subname(5, "0_branch")
         .flags(statistics::total | statistics::pdf);
+
+    nonReadySrcOpsDispatchedPerCycle
+        .init(0, 64, 1)
+        .flags(statistics::pdf);
 }
 
 IEW::IEWStats::ExecutedInstStats::ExecutedInstStats(CPU *cpu)
@@ -1302,6 +1312,8 @@ IEW::dispatch(ThreadID tid)
 void
 IEW::dispatchInsts(ThreadID tid)
 {
+    dispatchActiveThisCycle = true;
+
     // Obtain instructions from skid buffer if unblocking, or queue from rename
     // otherwise.
     std::queue<DynInstPtr> &insts_to_dispatch =
@@ -1312,6 +1324,7 @@ IEW::dispatchInsts(ThreadID tid)
 
     DynInstPtr inst;
     bool add_to_iq = false;
+    bool iq_inserted = false;
     int dis_num_inst = 0;
 
     // Loop through the instructions, putting them in the instruction
@@ -1415,6 +1428,7 @@ IEW::dispatchInsts(ThreadID tid)
 
 
         // Otherwise issue the instruction just fine.
+        iq_inserted = false;
         if (inst->isAtomic()) {
             DPRINTF(IEW, "[tid:%i] Issue: Memory instruction "
                     "encountered, adding to LSQ.\n", tid);
@@ -1429,6 +1443,7 @@ IEW::dispatchInsts(ThreadID tid)
             inst->setCanCommit();
             instQueue.insertNonSpec(inst);
             add_to_iq = false;
+            iq_inserted = true;
 
             ++iewStats.dispNonSpecInsts;
 
@@ -1462,6 +1477,7 @@ IEW::dispatchInsts(ThreadID tid)
                 inst->setCanCommit();
                 instQueue.insertNonSpec(inst);
                 add_to_iq = false;
+                iq_inserted = true;
 
                 ++iewStats.dispNonSpecInsts;
             } else {
@@ -1474,6 +1490,7 @@ IEW::dispatchInsts(ThreadID tid)
             inst->setCanCommit();
             instQueue.insertBarrier(inst);
             add_to_iq = false;
+            iq_inserted = true;
         } else if (inst->isNop()) {
             DPRINTF(IEW, "[tid:%i] Issue: Nop instruction encountered, "
                     "skipping.\n", tid);
@@ -1505,12 +1522,22 @@ IEW::dispatchInsts(ThreadID tid)
             ++iewStats.dispNonSpecInsts;
 
             add_to_iq = false;
+            iq_inserted = true;
         }
 
         // If the instruction queue is not full, then add the
         // instruction.
         if (add_to_iq) {
             instQueue.insert(inst);
+            iq_inserted = true;
+        }
+
+        // Count non-ready source operands for all instructions actually
+        // inserted into the IQ (regular, non-spec, or barrier), but not
+        // for NOPs which are immediately marked as executed.
+        if (iq_inserted) {
+            nonReadySrcOpsDispatchedThisCycle +=
+                inst->numSrcs() - inst->readyRegs;
         }
 
         insts_to_dispatch.pop();
@@ -2205,6 +2232,14 @@ IEW::tick()
         checkSignalsAndUpdate(tid);
         dispatch(tid);
     }
+
+    // Sample per-cycle dispatch non-ready operand count for non-stalled cycles
+    if (dispatchActiveThisCycle) {
+        iewStats.nonReadySrcOpsDispatchedPerCycle.sample(
+            nonReadySrcOpsDispatchedThisCycle);
+    }
+    nonReadySrcOpsDispatchedThisCycle = 0;
+    dispatchActiveThisCycle = false;
 
     if (exeStatus != Squashing) {
         executeInsts();
