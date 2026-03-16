@@ -39,5 +39,6 @@ typings
 runs/**
 !runs/**/scripts/
 !runs/**/scripts/**
+runs/scripts/__pycache__/
 results/
 mast_gem5.sif
