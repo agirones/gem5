@@ -33,12 +33,9 @@ module load Python/3.12.3-GCCcore-13.3.0
 GEM5_ROOT="${GEM5_ROOT:-/cluster/home/andreug/research/EECS-NTNU/gem5-NTNU}"
 GEM5_CONFIG="${GEM5_CONFIG:-${GEM5_ROOT}/configs/mast/profile-config-legacy.py}"
 
-I_BUFFER_HEAD="${I_BUFFER_HEAD:-1}"
-I_BUFFER_SIZE="${I_BUFFER_SIZE:-256}"
 IQ_SIZE="${IQ_SIZE:-256}"
 LQ_SIZE="${LQ_SIZE:-256}"
 SQ_SIZE="${SQ_SIZE:-256}"
-N_SLOTS="${N_SLOTS:-2}"
 BROADCAST_MAX="${BROADCAST_MAX:-12}"
 DEPENDENTS_THRESHOLD="${DEPENDENTS_THRESHOLD:--1}"
 
@@ -47,8 +44,7 @@ echo "  Job ID    : ${SLURM_JOB_ID}"
 echo "  Benchmark : ${BENCHMARK_NUM}"
 echo "  Simpoint  : ${SIMPOINT_NUM}"
 echo "  CPU width : ${CPU_WIDTH}"
-echo "  i-buf-head: ${I_BUFFER_HEAD}  i-buf-size: ${I_BUFFER_SIZE}"
-echo "  IQ/LQ/SQ  : ${IQ_SIZE}/${LQ_SIZE}/${SQ_SIZE}  n-slots: ${N_SLOTS}"  echo "  bcastMax  : ${BROADCAST_MAX}  dep-thresh: ${DEPENDENTS_THRESHOLD}"echo "  Output dir: ${OUTPUT_DIR}"
+echo "  IQ/LQ/SQ  : ${IQ_SIZE}/${LQ_SIZE}/${SQ_SIZE}"  echo "  bcastMax  : ${BROADCAST_MAX}  dep-thresh: ${DEPENDENTS_THRESHOLD}"echo "  Output dir: ${OUTPUT_DIR}"
 echo "================================"
 
 mkdir -p "${OUTPUT_DIR}/slurm_logs"
@@ -62,11 +58,8 @@ python3 "${GEM5_ROOT}/configs/mast/invoke-run.py" \
     --cpu-width      "${CPU_WIDTH}"      \
     --output-dir     "${OUTPUT_DIR}"     \
     --config         "${GEM5_CONFIG}"    \
-    --i-buffer-head  "${I_BUFFER_HEAD}"  \
-    --i-buffer-size  "${I_BUFFER_SIZE}"  \
     --iq-size        "${IQ_SIZE}"        \
     --lq-size              "${LQ_SIZE}"              \
     --sq-size              "${SQ_SIZE}"              \
-    --n-slots              "${N_SLOTS}"              \
     --broadcastMax         "${BROADCAST_MAX}"        \
     --dependentsThreshold  "${DEPENDENTS_THRESHOLD}"
