@@ -666,6 +666,9 @@ class IEW
         /** Distribution of non-ready source operands dispatched to IQ per
          *  active (non-stalled) cycle. */
         statistics::Distribution nonReadySrcOpsDispatchedPerCycle;
+        /** Histogram of broadcast queue occupancy at the start of each
+         *  non-stalled cycle. */
+        statistics::Distribution broadcastQueueOccupancyPerCycle;
     } iewStats;
 };
 

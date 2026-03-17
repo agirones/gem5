@@ -372,7 +372,10 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
              "Histogram of how many precisse wake up occur per cycle."),
     ADD_STAT(nonReadySrcOpsDispatchedPerCycle, statistics::units::Count::get(),
              "Distribution of non-ready source operands dispatched to the IQ "
-             "per active (non-stalled) cycle")
+             "per active (non-stalled) cycle"),
+    ADD_STAT(broadcastQueueOccupancyPerCycle, statistics::units::Count::get(),
+             "Histogram of broadcast queue occupancy at the start of each "
+             "non-stalled cycle")
 {
     instsToCommit
         .init(cpu->numThreads)
@@ -675,6 +678,10 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
         .flags(statistics::total | statistics::pdf);
 
     nonReadySrcOpsDispatchedPerCycle
+        .init(0, 64, 1)
+        .flags(statistics::pdf);
+
+    broadcastQueueOccupancyPerCycle
         .init(0, 64, 1)
         .flags(statistics::pdf);
 }
@@ -2246,6 +2253,8 @@ IEW::tick()
     if (dispatchActiveThisCycle) {
         iewStats.nonReadySrcOpsDispatchedPerCycle.sample(
             nonReadySrcOpsDispatchedThisCycle);
+        iewStats.broadcastQueueOccupancyPerCycle.sample(
+            broadcastQueue.size());
     }
     nonReadySrcOpsDispatchedThisCycle = 0;
     dispatchActiveThisCycle = false;
