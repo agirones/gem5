@@ -666,6 +666,12 @@ class IEW
         /** Distribution of non-ready source operands dispatched to IQ per
          *  active (non-stalled) cycle. */
         statistics::Distribution nonReadySrcOpsDispatchedPerCycle;
+        /** Histogram of non-ready int/fp/vec source operands per dispatched
+         *  instruction (for instructions inserted into the IQ). */
+        statistics::Distribution nonReadyIntFpVecSrcOpsPerDispatchedInst;
+        /** Histogram of int/fp/vec destination registers per dispatched
+         *  instruction. */
+        statistics::Distribution intFpVecDestRegsPerDispatchedInst;
         /** Histogram of broadcast queue occupancy at the start of each
          *  non-stalled cycle. */
         statistics::Distribution broadcastQueueOccupancyPerCycle;

@@ -373,6 +373,12 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
     ADD_STAT(nonReadySrcOpsDispatchedPerCycle, statistics::units::Count::get(),
              "Distribution of non-ready source operands dispatched to the IQ "
              "per active (non-stalled) cycle"),
+    ADD_STAT(nonReadyIntFpVecSrcOpsPerDispatchedInst, statistics::units::Count::get(),
+             "Histogram of non-ready int/fp/vec source operands per dispatched "
+             "instruction (for instructions inserted into the IQ)"),
+    ADD_STAT(intFpVecDestRegsPerDispatchedInst, statistics::units::Count::get(),
+             "Histogram of int/fp/vec destination registers per dispatched "
+             "instruction"),
     ADD_STAT(broadcastQueueOccupancyPerCycle, statistics::units::Count::get(),
              "Histogram of broadcast queue occupancy at the start of each "
              "non-stalled cycle")
@@ -679,6 +685,14 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
 
     nonReadySrcOpsDispatchedPerCycle
         .init(0, 64, 1)
+        .flags(statistics::pdf);
+
+    nonReadyIntFpVecSrcOpsPerDispatchedInst
+        .init(0, 16, 1)
+        .flags(statistics::pdf);
+
+    intFpVecDestRegsPerDispatchedInst
+        .init(0, 16, 1)
         .flags(statistics::pdf);
 
     broadcastQueueOccupancyPerCycle
@@ -1545,15 +1559,18 @@ IEW::dispatchInsts(ThreadID tid)
         // Only int, float, and vector registers are counted; CC and misc
         // (control) registers are excluded.
         if (iq_inserted) {
+            int nonReadyIntFpVecCount = 0;
             for (int i = 0; i < inst->numSrcs(); ++i) {
                 if (!inst->readySrcIdx(i)) {
                     RegClassType rc =
                         inst->renamedSrcIdx(i)->classValue();
                     if (rc == IntRegClass || rc == FloatRegClass || rc == VecRegClass) {
                         nonReadySrcOpsDispatchedThisCycle++;
+                        nonReadyIntFpVecCount++;
                     }
                 }
             }
+            iewStats.nonReadyIntFpVecSrcOpsPerDispatchedInst.sample(nonReadyIntFpVecCount);
         }
 
         insts_to_dispatch.pop();
@@ -1718,15 +1735,22 @@ IEW::dispatchInsts(ThreadID tid)
             }
         }
 
-        for (int i = 0; i < inst->numDestRegs(); ++i) {
-            PhysRegIdPtr phys_reg = inst->renamedDestIdx(i);
-            RegClassType type = phys_reg->classValue();
+        {
+            int intFpVecDestCount = 0;
+            for (int i = 0; i < inst->numDestRegs(); ++i) {
+                PhysRegIdPtr phys_reg = inst->renamedDestIdx(i);
+                RegClassType type = phys_reg->classValue();
 
-            if (type == InvalidRegClass){
-                iewStats.dispatchedDestRegsByClass[8]++;
-            } else {
-                iewStats.dispatchedDestRegsByClass[type]++;
+                if (type == InvalidRegClass){
+                    iewStats.dispatchedDestRegsByClass[8]++;
+                } else {
+                    iewStats.dispatchedDestRegsByClass[type]++;
+                    if (type == IntRegClass || type == FloatRegClass || type == VecRegClass) {
+                        intFpVecDestCount++;
+                    }
+                }
             }
+            iewStats.intFpVecDestRegsPerDispatchedInst.sample(intFpVecDestCount);
         }
 
 #if TRACING_ON
