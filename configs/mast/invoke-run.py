@@ -244,6 +244,8 @@ for i in indices:
         "--iq-size", str(args.iq_size),
         "--lq-size", str(args.lq_size),
         "--sq-size", str(args.sq_size),
+        "--broadcastMax", str(args.broadcastMax),
+        "--dependentsThreshold", str(args.dependentsThreshold),
     ])
 
     result = subprocess.run(cmd)
