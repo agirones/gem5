@@ -129,8 +129,6 @@ IEW::IEW(CPU *_cpu, const BaseO3CPUParams &params)
 
     skidBufferMax = (renameToIEWDelay + 1) * params.renameWidth;
 
-    broadcastProposalComparisons = 0;
-
     nonReadySrcOpsDispatchedThisCycle = 0;
     dispatchActiveThisCycle = false;
 }
@@ -320,12 +318,10 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
              "Mnenomics of macroop instructions with 3 or more non-ready, non-CCRegClass source operands"),
     ADD_STAT(numUniqueWakers, statistics::units::Count::get(),
              "Number of unique instructions that woke up an instruction"),
-    ADD_STAT(wakeupBaselineComparisons, statistics::units::Count::get(),
-             "Total number of comparisons in the IQ during wakeup in the baseline"),
     ADD_STAT(wakeupNecessaryComparisons, statistics::units::Count::get(),
              "Number of strictly necessary comparisons in the IQ during wakeup"),
-    ADD_STAT(broadcastProposalComparisons, statistics::units::Count::get(),
-             "Total number of comparisons in the IQ during wakeup in the broadcast proposal"),
+    ADD_STAT(iqWakeupComparisons, statistics::units::Count::get(),
+             "Total number of IQ tag comparisons performed during broadcast wakeup"),
     ADD_STAT(wakeupMicroopDestOperands, statistics::units::Count::get(),
              "Histogram of destination operands for micro-ops during wakeup"),
     ADD_STAT(wakeupDestRegsByClass, statistics::units::Count::get(),
@@ -620,13 +616,10 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
         .subname(3, "3_or_more")
         .flags(statistics::total | statistics::pdf);
 
-    wakeupBaselineComparisons
-        .flags(statistics::total);
-
     wakeupNecessaryComparisons
         .flags(statistics::total);
 
-    broadcastProposalComparisons
+    iqWakeupComparisons
         .flags(statistics::total);
 
     wakeupMicroopDestOperands
@@ -2150,7 +2143,6 @@ IEW::writebackInsts()
                             type != MiscRegClass){
                             iewStats.wakeupNecessaryComparisons += numDependents;
                             ++count_precisse_wakeups;
-                            iewStats.wakeupBaselineComparisons += numDependents;
                             ++iewStats.precisseWakeUp;
                         }
                     }
@@ -2210,7 +2202,7 @@ IEW::writebackInsts()
                 type != MiscRegClass){
                 broadcastCount++;
                 ++iewStats.broadcastWakeUp;
-                iewStats.wakeupBaselineComparisons += num_non_ready_operands_iq;
+                iewStats.iqWakeupComparisons += num_non_ready_operands_iq;
                 iewStats.wakeupNecessaryComparisons += numDependents;
                 iewStats.iqOccupancyHist.sample(num_non_ready_operands_iq);
                 if(numDependents >= 3){

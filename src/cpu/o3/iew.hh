@@ -134,8 +134,6 @@ class IEW
     ProbePointArg<DynInstPtr> *ppExecute;
     /** To probe when instruction execution is complete. */
     ProbePointArg<DynInstPtr> *ppToCommit;
-    /** To debug the number of comparisons. */
-    unsigned long broadcastProposalComparisons;
 
   public:
     /** Constructs a IEW with the given parameters. */
@@ -613,12 +611,10 @@ class IEW
         statistics::Vector macroopMnenomicsNonReadyNonCCRegs3Plus;
         /* Number of unique instructions that woke up an instruction. */
         statistics::Vector numUniqueWakers;
-        /* Total number of comparisons in the IQ during wakeup in the baseline. */
-        statistics::Scalar wakeupBaselineComparisons;
         /* Number of strictly necessary comparisons in the IQ during wakeup. */
         statistics::Scalar wakeupNecessaryComparisons;
-        /* Total number of comparisons in the IQ during wakeup in the broadcast proposal. */
-        statistics::Scalar broadcastProposalComparisons;
+        /* Total number of IQ tag comparisons performed during broadcast wakeup. */
+        statistics::Scalar iqWakeupComparisons;
         /* Histogram of destination operands for micro-ops during wakeup. */
         statistics::Distribution wakeupMicroopDestOperands;
         /* Count of each physical register class used as a destination operand at wakeup. */
