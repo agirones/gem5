@@ -40,8 +40,8 @@ BASELINE_DIR = ROOT / "runs/output/micro26/baseline/12B_-1P"
 
 # Non-baseline approaches to compare against the baseline.
 APPROACHES: dict[str, Path] = {
-    "Sereno":    ROOT / "runs/output/micro26/whisper/1B_2P",
-    "Hybrid-WL": ROOT / "runs/output/micro26/baseline/12B_-1P",  # TODO: update path
+    "Sereno":    ROOT / "runs/output/micro26/sereno/ckpt",
+    "Hybrid-WL": ROOT / "runs/output/micro26/hybrid-wl/ckpt",
     "N-Use":     ROOT / "runs/output/micro26/n-use/ino-i-buffer/i-buffer-head/2",
     "EDF":       ROOT / "runs/output/micro26/edf/dmt_slots/2",
 }
@@ -127,7 +127,10 @@ def collect_ipc(base_dir: Path) -> dict[str, float]:
     """
     Walk *base_dir* and return {benchmark: weighted_IPC}.
     """
-    stats_files = sorted(base_dir.glob("**/stats.txt"))
+    stats_files = sorted(
+        f for f in base_dir.glob("**/stats.txt")
+        if "sensibility_analysis" not in f.parts
+    )
     if not stats_files:
         print(f"  WARNING: no stats.txt found under {base_dir}")
         return {}
@@ -230,7 +233,7 @@ def generate_tikz(
     sym_coords = ", ".join(x_labels)
 
     # Display labels: clean human-readable names, vertical orientation.
-    display_labels = [clean_label(lb) for lb in all_benchmarks] + ["Harmonic Mean"]
+    display_labels = [clean_label(lb) for lb in all_benchmarks] + [r"\textbf{HMean}"]
     xticklabels = ", ".join(display_labels)   # no LaTeX escaping needed after cleaning
 
     define_colors = ""
@@ -263,6 +266,9 @@ def generate_tikz(
         r"\pgfplotsset{compat=1.18}" "\n"
         r"\usetikzlibrary{patterns}" "\n"
         "\n"
+        r"\pgfdeclarelayer{background}" "\n"
+        r"\pgfsetlayers{background,main}" "\n"
+        "\n"
         + define_colors +
         "\n"
         r"\pgfplotsset{" "\n"
@@ -275,26 +281,19 @@ def generate_tikz(
         r"\begin{document}" "\n"
         r"\begin{tikzpicture}" "\n"
         r"\begin{axis}[" "\n"
+        r"    width           = 1.3\textwidth, height=4cm, scale only axis," "\n"
         r"    ybar            = 0.5pt," "\n"
         r"    area legend," "\n"
         r"    bar width       = 3.5pt," "\n"
-        r"    width           = 15.5cm," "\n"
-        r"    height          = 6cm," "\n"
         r"    enlarge x limits= 0.03," "\n"
         f"    symbolic x coords = {{{sym_coords}}},\n"
         r"    xtick           = data," "\n"
         f"    xticklabels     = {{{xticklabels}}},\n"
-        r"    x tick label style = {rotate=90, anchor=east, font=\scriptsize}," "\n"
+        r"    x tick label style = {rotate=90, anchor=east}," "\n"
         r"    ymin            = -35," "\n"
         r"    ymax            = 5," "\n"
         r"    ytick           = {-30, -20, -10, 0, 5}," "\n"
-        r"    extra y ticks   = {0}," "\n"
-        r"    extra y tick style = {" "\n"
-        r"        grid=major," "\n"
-        r"        grid style={solid, black!50, line width=0.6pt}," "\n"
-        r"    }," "\n"
         r"    ylabel          = {Normalized performance}," "\n"
-        r"    ylabel style    = {font=\small}," "\n"
         r"    ymajorgrids     = true," "\n"
         r"    grid style      = {dashed, gray!30}," "\n"
         r"    axis line style = {gray!60}," "\n"
@@ -303,17 +302,16 @@ def generate_tikz(
         r"        at={(0.5,1.03)}, anchor=south," "\n"
         r"        font=\scriptsize," "\n"
         r"        cells={anchor=west}," "\n"
-        r"        draw=gray!50," "\n"
-        r"        fill=white," "\n"
+        r"        draw=none," "\n"
         r"        /tikz/every even column/.append style={column sep=10pt}," "\n"
         r"    }," "\n"
         r"    legend columns  = -1," "\n"
         r"    tick label style= {font=\scriptsize}," "\n"
         r"    yticklabel        = {\pgfmathprintnumber\tick\%}," "\n"
         r"    after end axis/.code={" "\n"
-        r"        \draw[gray!70, dashed, line width=0.8pt]" "\n"
-        r"            ([xshift=-10pt]{axis cs:HarmonicMean,\pgfkeysvalueof{/pgfplots/ymin}})" "\n"
-        r"            -- ([xshift=-10pt]{axis cs:HarmonicMean,\pgfkeysvalueof{/pgfplots/ymax}});" "\n"
+        r"        \begin{pgfonlayer}{background}" "\n"
+        r"            \fill[gray!60] ([xshift=-11pt]{axis cs:HarmonicMean,\pgfkeysvalueof{/pgfplots/ymin}}) rectangle (rel axis cs:1,1);" "\n"
+        r"        \end{pgfonlayer}" "\n"
         r"    }," "\n"
         r"]" "\n"
         "\n"

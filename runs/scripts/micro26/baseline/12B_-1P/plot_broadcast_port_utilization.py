@@ -65,21 +65,21 @@ _REP_H2D = [85.0, 12.0,  1.5,  0.8, 0.4, 0.15, 0.07, 0.03, 0.02, 0.01, 0.01, 0.0
 #  cat2-12: YlGnBu ColorBrewer sequence (light yellow → dark navy)   #
 # ------------------------------------------------------------------ #
 _CAT_RGB = [
-    (220, 220, 220),   # cat0  – light gray
-    ( 31, 119, 180),   # cat1  – clrSereno
-    (255, 255, 217),   # cat2
-    (237, 248, 177),   # cat3
-    (199, 233, 180),   # cat4
-    (127, 205, 187),   # cat5
-    ( 65, 182, 196),   # cat6
-    ( 29, 145, 192),   # cat7
-    ( 34,  94, 168),   # cat8
-    ( 37,  52, 148),   # cat9
-    ( 20,  41, 113),   # cat10
-    ( 12,  29,  99),   # cat11
-    (  8,  29,  88),   # cat12 – darkest
+    (166, 206, 227),   # cat0: Light Blue
+    ( 31, 120, 180),   # cat1: Dark Blue
+    (178, 223, 138),   # cat2: Light Green
+    ( 51, 160, 44),    # cat3: Dark Green
+    (251, 154, 153),   # cat4: Light Red
+    (227,  26,  28),   # cat5: Dark Red
+    (253, 191, 111),   # cat6: Light Orange
+    (255, 127,   0),   # cat7: Dark Orange
+    (202, 178, 214),   # cat8: Light Purple
+    (106,  61, 154),   # cat9: Dark Purple
+    (255, 255, 153),   # cat10: Pale Yellow
+    (177,  89,  40),   # cat11: Brown
+    ( 80,  80,  80),   # cat12: Dark Slate
 ]
-_PATTERNS = ["crosshatch dots"] + [None] * 12
+_PATTERNS = [None] + [None] * 12
 _PAT_COLS = ["gray!60"]         + [None] * 12
 
 CONFIGS      = ["CAM", "H1D", "H2D"]
@@ -122,7 +122,7 @@ def parse_stats(stats_file):
 
 
 def collect_cam_data(base_dir):
-    """Return {benchmark: {stat_key: weighted_mean_count}}."""
+    """Return {benchmark: {stat_key: weighted_sum}} — raw weighted sums over simpoints."""
     if not base_dir.exists():
         print(f"ERROR: CAM data directory not found: {base_dir}")
         return {}
@@ -132,7 +132,6 @@ def collect_cam_data(base_dir):
         return {}
 
     weighted = defaultdict(lambda: defaultdict(float))
-    wsum     = defaultdict(float)
 
     for sf in stats_files:
         benchmark = sf.parent.parent.parent.name
@@ -145,15 +144,8 @@ def collect_cam_data(base_dir):
         for key in STAT_KEYS + STAT_KEYS_EX01 + STAT_KEYS_EX012:
             if key in vals:
                 weighted[benchmark][key] += weight * vals[key]
-        wsum[benchmark] += weight
 
-    result = {}
-    for bm, d in weighted.items():
-        if wsum[bm] <= 0:
-            continue
-        result[bm] = {k: d[k] / wsum[bm] for k in STAT_KEYS + STAT_KEYS_EX01 + STAT_KEYS_EX012}
-
-    return result
+    return {bm: dict(d) for bm, d in weighted.items()}
 
 
 # ------------------------------------------------------------------ #
@@ -227,11 +219,17 @@ def generate_tikz(cam_raw, output_path):
             "H2D": to_percentages(cam_raw[bm], STAT_KEYS_EX012),
         }
 
-    # ---- arithmetic mean across benchmarks ----------------------------
+    # ---- weighted arithmetic mean across benchmarks (weight = total events per bm per cfg)
+    stat_keys_for_cfg = {"CAM": STAT_KEYS, "H1D": STAT_KEYS_EX01, "H2D": STAT_KEYS_EX012}
     mean_pct = {}
     for cfg in CONFIGS:
+        keys        = stat_keys_for_cfg[cfg]
+        bm_totals   = {bm: sum(cam_raw[bm].get(k, 0.0) for k in keys) for bm in benchmarks}
+        grand_total = sum(bm_totals.values())
+        bm_weights  = {bm: bm_totals[bm] / grand_total for bm in benchmarks} if grand_total > 0 \
+                      else {bm: 1.0 / len(benchmarks) for bm in benchmarks}
         mean_pct[cfg] = [
-            sum(pct[bm][cfg][i] for bm in benchmarks) / len(benchmarks)
+            sum(bm_weights[bm] * pct[bm][cfg][i] for bm in benchmarks)
             for i in range(NUM_CATS)
         ]
 
@@ -259,7 +257,7 @@ def generate_tikz(cam_raw, output_path):
     spacers.append(sp_mean)
     all_x.extend(["Mn_CAM", "Mn_H1D", "Mn_H2D"])
     xtick.append("Mn_H1D")
-    xlabels.append("Mean")
+    xlabels.append(r"\textbf{Mean}")
 
     sym_coords      = ", ".join(all_x)
     xtick_str       = ", ".join(xtick)
@@ -309,24 +307,22 @@ def generate_tikz(cam_raw, output_path):
 
     addplot_str = "\n".join(addplot_blocks)
 
-    # The spMn spacer already provides visual separation before Mean;
-    # keep a light dashed line for extra clarity.
+    # Grey shadow background for the Mean group (replaces dashed separator).
     mean_sep = (
-        "    % --- vertical separator before Mean group ---\n"
-        "    \\draw[gray!50, dashed, line width=0.8pt]\n"
-        "        ([xshift=-4.5pt]{axis cs:Mn_CAM,\\pgfkeysvalueof{/pgfplots/ymin}})\n"
-        "        -- ([xshift=-4.5pt]{axis cs:Mn_CAM,\\pgfkeysvalueof{/pgfplots/ymax}});\n"
+        "    \\begin{pgfonlayer}{background}\n"
+        "        \\fill[gray!60] ([xshift=-4.5pt]{axis cs:Mn_CAM,\\pgfkeysvalueof{/pgfplots/ymin}}) rectangle (rel axis cs:1,1);\n"
+        "    \\end{pgfonlayer}\n"
     )
 
     first_bm = benchmarks[0]
     config_labels_str = (
         f"    % --- config labels on first group bars ---\n"
         f"    \\node[rotate=90, anchor=west, font=\\tiny, inner sep=1pt]\n"
-        f"        at (axis cs:{first_bm}_CAM, 102) {{Baseline}};\n"
+        f"        at (axis cs:{first_bm}_CAM, 102) {{CAM-Based}};\n"
         f"    \\node[rotate=90, anchor=west, font=\\tiny, inner sep=1pt]\n"
-        f"        at (axis cs:{first_bm}_H1D, 102) {{2+ deps}};\n"
+        f"        at (axis cs:{first_bm}_H1D, 102) {{Hybrid-1D}};\n"
         f"    \\node[rotate=90, anchor=west, font=\\tiny, inner sep=1pt]\n"
-        f"        at (axis cs:{first_bm}_H2D, 102) {{3+ deps}};\n"
+        f"        at (axis cs:{first_bm}_H2D, 102) {{Hybrid-2D}};\n"
     )
 
     # ---- chart width: scale with number of benchmarks + spacers ------
@@ -339,6 +335,9 @@ def generate_tikz(cam_raw, output_path):
         r"\usepackage{pgfplots}" "\n"
         r"\pgfplotsset{compat=1.18}" "\n"
         r"\usetikzlibrary{patterns}" "\n"
+        "\n"
+        r"\pgfdeclarelayer{background}" "\n"
+        r"\pgfsetlayers{background,main}" "\n"
         "\n"
         + _define_colors()
         + "\n"
@@ -354,8 +353,7 @@ def generate_tikz(cam_raw, output_path):
         r"\begin{axis}[" "\n"
         r"    ybar stacked," "\n"
         r"    bar width       = 4.5pt," "\n"
-        f"    width           = {chart_width_cm:.1f}cm,\n"
-        r"    height          = 7cm," "\n"
+        r"    width           = 1.3\textwidth, height=4cm, scale only axis," "\n"
         r"    enlarge x limits= 0.03," "\n"
         r"    clip             = false," "\n"
         f"    symbolic x coords = {{{sym_coords}}},\n"
@@ -365,13 +363,12 @@ def generate_tikz(cam_raw, output_path):
         f"    minor x tick num  = 0," "\n"
         f"    tick align        = outside," "\n"
         f"    minor tick length = 3pt," "\n"
-        r"    x tick label style = {rotate=90, anchor=east, font=\scriptsize}," "\n"
+        r"    x tick label style = {rotate=90, anchor=east}," "\n"
         r"    ymin            = 0," "\n"
         r"    ymax            = 100," "\n"
         r"    ytick           = {0, 20, 40, 60, 80, 100}," "\n"
         r"    yticklabel      = {\pgfmathprintnumber{\tick}\%}," "\n"
         r"    ylabel          = {Percentage of Cycles}," "\n"
-        r"    ylabel style    = {font=\normalsize}," "\n"
         r"    ymajorgrids     = true," "\n"
         r"    grid style      = {dashed, gray!30}," "\n"
         r"    axis line style = {gray!60}," "\n"
@@ -381,7 +378,6 @@ def generate_tikz(cam_raw, output_path):
         r"        font=\scriptsize," "\n"
         r"        cells={anchor=west}," "\n"
         r"        draw=none," "\n"
-        r"        fill=white," "\n"
         r"        /tikz/every even column/.append style={column sep=6pt}," "\n"
         r"    }," "\n"
         r"    legend columns  = -1," "\n"
@@ -432,8 +428,12 @@ def main():
         row = f"{bm:<28}" + "".join(f"{v:>7.2f}%" for v in cam_pct)
         print(row)
 
+    bm_totals_cam   = [sum(cam_raw[bm].get(k, 0.0) for k in STAT_KEYS) for bm in benchmarks]
+    grand_total_cam = sum(bm_totals_cam)
+    bm_weights_cam  = [t / grand_total_cam for t in bm_totals_cam] if grand_total_cam > 0 \
+                      else [1.0 / len(benchmarks)] * len(benchmarks)
     means = [
-        sum(p[i] for p in cam_pcts_all) / len(cam_pcts_all)
+        sum(bm_weights_cam[j] * cam_pcts_all[j][i] for j in range(len(benchmarks)))
         for i in range(NUM_CATS)
     ]
     print("-" * len(hdr))
@@ -450,8 +450,12 @@ def main():
         ex01_pcts_all.append(ex01_pct)
         row = f"{bm:<28}" + "".join(f"{v:>7.2f}%" for v in ex01_pct)
         print(row)
+    bm_totals_ex01   = [sum(cam_raw[bm].get(k, 0.0) for k in STAT_KEYS_EX01) for bm in benchmarks]
+    grand_total_ex01 = sum(bm_totals_ex01)
+    bm_weights_ex01  = [t / grand_total_ex01 for t in bm_totals_ex01] if grand_total_ex01 > 0 \
+                       else [1.0 / len(benchmarks)] * len(benchmarks)
     means_ex01 = [
-        sum(p[i] for p in ex01_pcts_all) / len(ex01_pcts_all)
+        sum(bm_weights_ex01[j] * ex01_pcts_all[j][i] for j in range(len(benchmarks)))
         for i in range(NUM_CATS)
     ]
     print("-" * len(hdr))
@@ -468,8 +472,12 @@ def main():
         ex012_pcts_all.append(ex012_pct)
         row = f"{bm:<28}" + "".join(f"{v:>7.2f}%" for v in ex012_pct)
         print(row)
+    bm_totals_ex012   = [sum(cam_raw[bm].get(k, 0.0) for k in STAT_KEYS_EX012) for bm in benchmarks]
+    grand_total_ex012 = sum(bm_totals_ex012)
+    bm_weights_ex012  = [t / grand_total_ex012 for t in bm_totals_ex012] if grand_total_ex012 > 0 \
+                        else [1.0 / len(benchmarks)] * len(benchmarks)
     means_ex012 = [
-        sum(p[i] for p in ex012_pcts_all) / len(ex012_pcts_all)
+        sum(bm_weights_ex012[j] * ex012_pcts_all[j][i] for j in range(len(benchmarks)))
         for i in range(NUM_CATS)
     ]
     print("-" * len(hdr))

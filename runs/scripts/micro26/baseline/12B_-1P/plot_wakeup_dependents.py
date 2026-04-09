@@ -73,7 +73,7 @@ def parse_stats(stats_file: Path) -> dict[str, float]:
 
 
 def collect_data(base_dir: Path, debug_bm: str = "") -> dict[str, dict[str, float]]:
-    """Return {benchmark: {stat_key: weighted_mean}}."""
+    """Return {benchmark: {stat_key: weighted_sum}} — raw weighted sums over simpoints."""
     if not base_dir.exists():
         print(f"ERROR: data directory not found: {base_dir}")
         return {}
@@ -84,7 +84,6 @@ def collect_data(base_dir: Path, debug_bm: str = "") -> dict[str, dict[str, floa
         return {}
 
     weighted: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    wsum:     dict[str, float]            = defaultdict(float)
 
     SHORT = [k.split("::")[1] for k in STAT_KEYS]
 
@@ -111,23 +110,17 @@ def collect_data(base_dir: Path, debug_bm: str = "") -> dict[str, dict[str, floa
         for key in STAT_KEYS:
             if key in vals:
                 weighted[benchmark][key] += weight * vals[key]
-        wsum[benchmark] += weight
 
     result: dict[str, dict[str, float]] = {}
     for bm, d in weighted.items():
-        if wsum[bm] <= 0:
-            continue
-        result[bm] = {k: d[k] / wsum[bm] for k in STAT_KEYS}
+        result[bm] = dict(d)
 
     if debug_bm and debug_bm in weighted:
         print(f"  --- Aggregated for {debug_bm} ---")
-        print(f"  total weight sum : {wsum[debug_bm]:.6f}")
         wm      = result[debug_bm]
-        acc     = {k: weighted[debug_bm][k] for k in STAT_KEYS}
         total_wm = sum(wm.values())
-        print(f"  weighted sums   : " + "  ".join(f"{s}={acc[k]:.2f}" for s, k in zip(SHORT, STAT_KEYS)))
-        print(f"  weighted means  : " + "  ".join(f"{s}={wm[k]:.4f}" for s, k in zip(SHORT, STAT_KEYS)))
-        print(f"  weighted mean total : {total_wm:.4f}")
+        print(f"  weighted sums   : " + "  ".join(f"{s}={wm[k]:.2f}" for s, k in zip(SHORT, STAT_KEYS)))
+        print(f"  weighted sum total : {total_wm:.4f}")
         pct = [100.0 * wm[k] / total_wm for k in STAT_KEYS] if total_wm > 0 else [0.0]*4
         print(f"  final pct       : " + "  ".join(f"{s}={p:.2f}%" for s, p in zip(SHORT, pct)))
         print()
@@ -158,20 +151,29 @@ def generate_tikz(data: dict[str, dict[str, float]], output_path: Path) -> None:
     for bm in benchmarks:
         pct_data[bm] = to_percentages(data[bm])
 
-    mean_pct = []
-    for i in range(len(STAT_KEYS)):
-        mean_pct.append(sum(pct_data[bm][i] for bm in benchmarks) / len(benchmarks))
+    bm_totals   = {bm: sum(data[bm].get(k, 0.0) for k in STAT_KEYS) for bm in benchmarks}
+    grand_total = sum(bm_totals.values())
+    bm_weights  = {bm: bm_totals[bm] / grand_total for bm in benchmarks} if grand_total > 0 \
+                  else {bm: 1.0 / len(benchmarks) for bm in benchmarks}
+
+    weighted_cat = [
+        sum(bm_weights[bm] * data[bm].get(STAT_KEYS[i], 0.0) for bm in benchmarks)
+        for i in range(len(STAT_KEYS))
+    ]
+    total_wc = sum(weighted_cat)
+    mean_pct = [100.0 * c / total_wc for c in weighted_cat] if total_wc > 0 \
+               else [0.0] * len(STAT_KEYS)
 
     x_labels     = benchmarks + ["Mean"]
-    display_labels = [clean_label(bm) for bm in benchmarks] + ["Mean"]
+    display_labels = [clean_label(bm) for bm in benchmarks] + [r"\textbf{Mean}"]
     sym_coords   = ", ".join(x_labels)
     xticklabels  = ", ".join(display_labels)
 
     colors = [
-        ("clrDep0",    "F2F2F2"),
-        ("clrDep1",    "B2ABD2"),
-        ("clrDep2",    "7570B3"),
-        ("clrDep3",    "3F007D"),
+        ("clrDep0", "352A86"),
+        ("clrDep1", "2C92A1"),
+        ("clrDep2", "8DCB6E"),
+        ("clrDep3", "F6C96B"),
     ]
     patterns = [
         None,
@@ -233,6 +235,9 @@ def generate_tikz(data: dict[str, dict[str, float]], output_path: Path) -> None:
         r"\pgfplotsset{compat=1.18}" "\n"
         r"\usetikzlibrary{patterns}" "\n"
         "\n"
+        r"\pgfdeclarelayer{background}" "\n"
+        r"\pgfsetlayers{background,main}" "\n"
+        "\n"
         + define_colors +
         "\n"
         r"\pgfplotsset{" "\n"
@@ -246,34 +251,40 @@ def generate_tikz(data: dict[str, dict[str, float]], output_path: Path) -> None:
         r"\begin{tikzpicture}" "\n"
         r"\begin{axis}[" "\n"
         r"    ybar stacked," "\n"
-        r"    bar width       = 18pt," "\n"
-        r"    width           = 15.5cm," "\n"
-        r"    height          = 7cm," "\n"
-        r"    enlarge x limits= 0.05," "\n"
+        r"    bar width       = 4.5pt," "\n"
+        r"    width           = 0.54\linewidth, height = 3cm, scale only axis," "\n"
+        r"    enlarge x limits= 0.03," "\n"
+        r"    clip            = false," "\n"
         f"    symbolic x coords = {{{sym_coords}}},\n"
         r"    xtick           = data," "\n"
         f"    xticklabels     = {{{xticklabels}}},\n"
         r"    tick align      = outside," + "\n"
-        r"    x tick label style = {rotate=90, anchor=east, font=\normalsize}," "\n"
+        r"    minor tick length = 3pt," "\n"
+        r"    x tick label style = {rotate=90, anchor=east, font=\scriptsize}," "\n"
         r"    ymin            = 0," "\n"
         r"    ymax            = 100," "\n"
         r"    ytick           = {0, 20, 40, 60, 80, 100}," "\n"
         r"    yticklabel      = {\pgfmathprintnumber{\tick}\%}," "\n"
-        r"    ylabel style    = {font=\normalsize}," "\n"
+        r"    ylabel          = {Fraction of Broadcasts}," "\n"
+        r"    ylabel style    = {font=\scriptsize}," "\n"
         r"    ymajorgrids     = true," "\n"
         r"    grid style      = {dashed, gray!30}," "\n"
         r"    axis line style = {gray!60}," "\n"
         r"    tick style      = {gray!60}," "\n"
         r"    legend style    = {" "\n"
-        r"        at={(0.5,1.1)}, anchor=south," "\n"
-        r"        font=\normalsize," "\n"
+        r"        at={(0.5,1.05)}, anchor=south," "\n"
+        r"        font=\scriptsize," "\n"
         r"        cells={anchor=west}," "\n"
         r"        draw=none," "\n"
-        r"        fill=white," "\n"
-        r"        /tikz/every even column/.append style={column sep=8pt}," "\n"
+        r"        /tikz/every even column/.append style={column sep=6pt}," "\n"
         r"    }," "\n"
         r"    legend columns  = -1," "\n"
-        r"    tick label style= {font=\normalsize}," "\n"
+        r"    tick label style= {font=\scriptsize}," "\n"
+        r"    after end axis/.code={" "\n"
+        r"        \begin{pgfonlayer}{background}" "\n"
+        r"            \fill[gray!60] ([xshift=-4.8pt]{axis cs:Mean,\pgfkeysvalueof{/pgfplots/ymin}}) rectangle (rel axis cs:1,1);" "\n"
+        r"        \end{pgfonlayer}" "\n"
+        r"    }," "\n"
         r"]" "\n"
         "\n"
         + addplot_str + "\n"
@@ -314,8 +325,17 @@ def main() -> None:
         row = f"{bm:<30}" + "".join(f"{v:>11.2f}%" for v in pct)
         print(row)
 
-    all_pct = [to_percentages(data[bm]) for bm in benchmarks]
-    means   = [sum(p[i] for p in all_pct) / len(all_pct) for i in range(len(STAT_KEYS))]
+    bm_totals_m   = [sum(data[bm].get(k, 0.0) for k in STAT_KEYS) for bm in benchmarks]
+    grand_total_m = sum(bm_totals_m)
+    bm_weights_m  = [t / grand_total_m for t in bm_totals_m] if grand_total_m > 0 \
+                    else [1.0 / len(benchmarks)] * len(benchmarks)
+    weighted_cat_m = [
+        sum(bm_weights_m[j] * data[benchmarks[j]].get(STAT_KEYS[i], 0.0) for j in range(len(benchmarks)))
+        for i in range(len(STAT_KEYS))
+    ]
+    total_wc_m = sum(weighted_cat_m)
+    means = [100.0 * c / total_wc_m for c in weighted_cat_m] if total_wc_m > 0 \
+            else [0.0] * len(STAT_KEYS)
     print("-" * len(header))
     print(f"{'Mean':<30}" + "".join(f"{v:>11.2f}%" for v in means))
 

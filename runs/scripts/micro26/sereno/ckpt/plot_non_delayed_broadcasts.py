@@ -1,27 +1,28 @@
 #!/usr/bin/env python3
 """
 Generates a standalone PGF/TikZ (pgfplots) bar chart showing, per benchmark,
-the percentage of IQ comparisons that are strictly necessary compared to the
-total (baseline CAM-based) comparisons performed during wakeup.
+the fraction of broadcasts that are non-delayed (i.e. happen the same cycle
+execution finishes) in the Sereno configuration.
 
-  necessary_ratio (%) = wakeupNecessaryComparisons / iqWakeupComparisons * 100
+  non_delayed_ratio (%) = sameCycleBroadcast / broadcastWakeUp * 100
 
-This illustrates how most comparisons in a CAM-based IQ are wasted:
-typical values are well below 5 %.
+A high ratio shows that most broadcasts in Sereno are non-delayed, meaning
+the wakeup logic can fire in the same cycle as execution completes.
 
 Data source
 -----------
-  system.cpu.iew.iqWakeupComparisons
-  system.cpu.iew.wakeupNecessaryComparisons
+  system.cpu.iew.sameCycleBroadcast
+  system.cpu.iew.broadcastWakeUp
 
 Read from:
-  runs/output/micro26/baseline/12B_-1P/width8/{benchmark}/{simpoint}/m5out/stats.txt
+  runs/output/micro26/whisper/1B_2P/width8/{benchmark}/{simpoint}/m5out/stats.txt
 
-Per-benchmark value: ratio of weighted-sum(necessary) / weighted-sum(baseline).
+Per-benchmark value: ratio of weighted-sum(sameCycleBroadcast) /
+                                  weighted-sum(broadcastWakeUp).
 The rightmost bar is the arithmetic mean across all per-benchmark ratios.
 
 Output:
-  runs/output/micro26/baseline/12B_-1P/graphs/necessary_comparisons.tex
+  runs/output/micro26/whisper/1B_2P/graphs/non_delayed_broadcasts.tex
 """
 
 import argparse
@@ -30,12 +31,12 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT       = Path(__file__).resolve().parents[5]   # .../gem5-NTNU/
-DATA_DIR   = ROOT / "runs/output/micro26/baseline/12B_-1P/width8"
-OUTPUT_TEX = ROOT / "runs/output/micro26/baseline/12B_-1P/graphs/necessary_comparisons.tex"
+DATA_DIR   = ROOT / "runs/output/micro26/sereno/ckpt/width8"
+OUTPUT_TEX = ROOT / "runs/output/micro26/sereno/ckpt/graphs/non_delayed_broadcasts.tex"
 
-KEY_BASELINE  = "system.cpu.iew.iqWakeupComparisons"
-KEY_NECESSARY = "system.cpu.iew.wakeupNecessaryComparisons"
-STAT_KEYS     = [KEY_BASELINE, KEY_NECESSARY]
+KEY_SAME_CYCLE = "system.cpu.iew.sameCycleBroadcast"
+KEY_BROADCAST  = "system.cpu.iew.broadcastWakeUp"
+STAT_KEYS      = [KEY_SAME_CYCLE, KEY_BROADCAST]
 
 # Benchmarks to include (same 19 used in other micro26 graphs).
 BENCHMARKS_ORDER = [
@@ -73,7 +74,7 @@ def extract_weight(path: Path) -> float:
 
 
 def parse_stats(stats_file: Path, debug: bool = False) -> dict[str, float]:
-    """Return the last simulation-dump values for KEY_BASELINE and KEY_NECESSARY."""
+    """Return the last simulation-dump values for KEY_SAME_CYCLE and KEY_BROADCAST."""
     in_dump  = False
     current: dict[str, float] = {}
     last: dict[str, float]    = {}
@@ -102,8 +103,8 @@ def parse_stats(stats_file: Path, debug: bool = False) -> dict[str, float]:
 
     if debug:
         print(f"      {stats_file.parent.parent.name}")
-        print(f"        baseline  : {last.get(KEY_BASELINE, 'N/A')}")
-        print(f"        necessary : {last.get(KEY_NECESSARY, 'N/A')}")
+        print(f"        sameCycleBroadcast : {last.get(KEY_SAME_CYCLE, 'N/A')}")
+        print(f"        broadcastWakeUp    : {last.get(KEY_BROADCAST, 'N/A')}")
 
     return last
 
@@ -113,7 +114,7 @@ def collect_data(
     debug_bm: str = "",
 ) -> dict[str, float]:
     """
-    Return {benchmark: necessary_ratio_percent} where the ratio is computed
+    Return {benchmark: non_delayed_ratio_percent} where the ratio is computed
     from the weighted sums of the two raw counters over all simpoints.
     """
     if not base_dir.exists():
@@ -125,8 +126,8 @@ def collect_data(
         print(f"WARNING: no stats.txt found under {base_dir}")
         return {}
 
-    w_baseline:  dict[str, float] = defaultdict(float)
-    w_necessary: dict[str, float] = defaultdict(float)
+    w_same_cycle: dict[str, float] = defaultdict(float)
+    w_broadcast:  dict[str, float] = defaultdict(float)
 
     for sf in stats_files:
         benchmark = sf.parent.parent.parent.name
@@ -137,42 +138,42 @@ def collect_data(
         debug        = (debug_bm and benchmark == debug_bm)
         vals         = parse_stats(sf, debug=debug)
 
-        if KEY_BASELINE not in vals or KEY_NECESSARY not in vals:
+        if KEY_SAME_CYCLE not in vals or KEY_BROADCAST not in vals:
             print(f"  WARNING: missing stats in {sf}")
             continue
 
-        w_baseline[benchmark]  += weight * vals[KEY_BASELINE]
-        w_necessary[benchmark] += weight * vals[KEY_NECESSARY]
+        w_same_cycle[benchmark] += weight * vals[KEY_SAME_CYCLE]
+        w_broadcast[benchmark]  += weight * vals[KEY_BROADCAST]
 
     result: dict[str, float] = {}
     for bm in BENCHMARKS_ORDER:
-        b = w_baseline.get(bm, 0.0)
-        n = w_necessary.get(bm, 0.0)
+        b = w_broadcast.get(bm, 0.0)
+        s = w_same_cycle.get(bm, 0.0)
         if b <= 0.0:
-            print(f"  WARNING: zero baseline for {bm}, skipping")
+            print(f"  WARNING: zero broadcastWakeUp for {bm}, skipping")
             continue
-        result[bm] = 100.0 * n / b
+        result[bm] = 100.0 * s / b
 
-    bm_baselines = {bm: w_baseline[bm] for bm in BENCHMARKS_ORDER if bm in result}
-    return result, bm_baselines
+    bm_broadcasts = {bm: w_broadcast[bm] for bm in BENCHMARKS_ORDER if bm in result}
+    return result, bm_broadcasts
 
 
-def generate_tikz(data: dict[str, float], bm_baselines: dict[str, float], output_path: Path) -> None:
+def generate_tikz(data: dict[str, float], bm_broadcasts: dict[str, float], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Build ordered list of benchmarks present in data
-    benchmarks    = [bm for bm in BENCHMARKS_ORDER if bm in data]
-    bench_labels  = [DISPLAY_LABELS[BENCHMARKS_ORDER.index(bm)] for bm in benchmarks]
-    ratios        = [data[bm] for bm in benchmarks]
-    grand_total   = sum(bm_baselines.get(bm, 0.0) for bm in benchmarks)
-    bm_weights    = {bm: bm_baselines.get(bm, 0.0) / grand_total for bm in benchmarks} \
-                    if grand_total > 0 else {bm: 1.0 / len(benchmarks) for bm in benchmarks}
-    mean_ratio    = sum(bm_weights[bm] * data[bm] for bm in benchmarks) if benchmarks else 0.0
+    benchmarks   = [bm for bm in BENCHMARKS_ORDER if bm in data]
+    bench_labels = [DISPLAY_LABELS[BENCHMARKS_ORDER.index(bm)] for bm in benchmarks]
+    ratios       = [data[bm] for bm in benchmarks]
+    grand_total  = sum(bm_broadcasts.get(bm, 0.0) for bm in benchmarks)
+    bm_weights   = {bm: bm_broadcasts.get(bm, 0.0) / grand_total for bm in benchmarks} \
+                   if grand_total > 0 else {bm: 1.0 / len(benchmarks) for bm in benchmarks}
+    mean_ratio   = sum(bm_weights[bm] * data[bm] for bm in benchmarks) if benchmarks else 0.0
 
-    x_labels      = benchmarks + ["Mean"]
-    display_lbl   = bench_labels + [r"\textbf{Mean}"]
-    sym_coords    = ", ".join(x_labels)
-    xticklabels   = ", ".join(display_lbl)
+    x_labels    = benchmarks + ["Mean"]
+    display_lbl = bench_labels + [r"\textbf{Mean}"]
+    sym_coords  = ", ".join(x_labels)
+    xticklabels = ", ".join(display_lbl)
 
     coords = []
     for bm, r in zip(benchmarks, ratios):
@@ -180,25 +181,22 @@ def generate_tikz(data: dict[str, float], bm_baselines: dict[str, float], output
     coords.append(f"        (Mean, {mean_ratio:.4f})")
     coord_str = "\n".join(coords)
 
-    # Y-axis: round up to next even integer above max value
-    max_val  = max(ratios + [mean_ratio])
-    y_max    = max(6.0, (int(max_val / 2) + 1) * 2)
-    y_step   = 2
-    ytick    = list(range(0, int(y_max) + 1, y_step))
+    # Y-axis: fixed 0–100 % range with steps of 20
+    y_max    = 100
+    y_step   = 20
+    ytick    = list(range(0, y_max + 1, y_step))
     ytick_str = ", ".join(str(v) for v in ytick)
 
-    # Professional steel blue: Tableau Blue, prints as medium gray in grayscale
-    fill_color = "RGB}{31,119,180"   # used as \definecolor{clrNecessary}{RGB}{31,119,180}
-
+    # clrSereno: Tableau Blue — consistent with all other micro26 graphs
     tex = (
         r"\documentclass[tikz]{standalone}" + "\n"
         r"\usepackage{pgfplots}" + "\n"
         r"\pgfplotsset{compat=1.18}" + "\n"
         "\n"
-        r"\definecolor{clrNecessary}{RGB}{31,119,180}" + "\n"
-        "\n"
         r"\pgfdeclarelayer{background}" + "\n"
         r"\pgfsetlayers{background,main}" + "\n"
+        "\n"
+        r"\definecolor{clrSereno}{RGB}{31,119,180}" + "\n"
         "\n"
         r"\begin{document}" + "\n"
         r"\begin{tikzpicture}" + "\n"
@@ -212,12 +210,12 @@ def generate_tikz(data: dict[str, float], bm_baselines: dict[str, float], output
         r"    xtick           = data," + "\n"
         f"    xticklabels     = {{{xticklabels}}},\n"
         r"    tick align      = outside," + "\n"
-        r"    x tick label style = {rotate=90, anchor=east, font=\scriptsize}," + "\n"
+        r"    x tick label style = {rotate=90, anchor=east}," + "\n"
         r"    ymin            = 0," + "\n"
-        f"    ymax            = {y_max},\n"
-        f"    ytick           = {{{ytick_str}}},\n"
+        r"    ymax            = 100," + "\n"
+        r"    ytick           = {0, 20, 40, 60, 80, 100}," + "\n"
         r"    yticklabel      = {\pgfmathprintnumber{\tick}\%}," + "\n"
-        r"    ylabel          = {Useful Comparisons}," + "\n"
+        r"    ylabel          = {Non-Delayed Broadcasts}," + "\n"
         r"    ylabel style    = {font=\scriptsize}," + "\n"
         r"    ymajorgrids     = true," + "\n"
         r"    grid style      = {dashed, gray!30}," + "\n"
@@ -240,8 +238,8 @@ def generate_tikz(data: dict[str, float], bm_baselines: dict[str, float], output
         r"]" + "\n"
         "\n"
         r"    \addplot[" + "\n"
-        r"        fill=clrNecessary," + "\n"
-        r"        draw=clrNecessary!60!black," + "\n"
+        r"        fill=clrSereno," + "\n"
+        r"        draw=clrSereno!60!black," + "\n"
         r"        line width=0.4pt," + "\n"
         r"    ] coordinates {" + "\n"
         + coord_str + "\n"
@@ -260,8 +258,8 @@ def generate_tikz(data: dict[str, float], bm_baselines: dict[str, float], output
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Plot the fraction of IQ wakeup comparisons that are strictly "
-            "necessary vs. the CAM baseline total."
+            "Plot the fraction of non-delayed broadcasts (Sereno): "
+            "sameCycleBroadcast / broadcastWakeUp per benchmark."
         )
     )
     parser.add_argument(
@@ -273,31 +271,31 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print(f"Collecting wakeup comparison stats from {DATA_DIR} ...")
+    print(f"Collecting broadcast stats from {DATA_DIR} ...")
     if args.debug:
         print(f"DEBUG mode: showing raw numbers for '{args.debug}'\n")
 
-    data, bm_baselines = collect_data(DATA_DIR, debug_bm=args.debug)
+    data, bm_broadcasts = collect_data(DATA_DIR, debug_bm=args.debug)
     if not data:
         print("No data found – nothing to plot.")
         return
 
     benchmarks = [bm for bm in BENCHMARKS_ORDER if bm in data]
     print(f"\nFound {len(benchmarks)} benchmarks:")
-    header = f"{'Benchmark':<30}  {'Necessary (%)':>15}"
+    header = f"{'Benchmark':<30}  {'Non-Delayed (%)':>17}"
     print(header)
     print("-" * len(header))
     for bm in benchmarks:
-        print(f"{bm:<30}  {data[bm]:>14.3f}%")
+        print(f"{bm:<30}  {data[bm]:>16.3f}%")
 
-    grand_total_m = sum(bm_baselines.get(bm, 0.0) for bm in benchmarks)
-    bm_weights_m  = {bm: bm_baselines.get(bm, 0.0) / grand_total_m for bm in benchmarks} \
+    grand_total_m = sum(bm_broadcasts.get(bm, 0.0) for bm in benchmarks)
+    bm_weights_m  = {bm: bm_broadcasts.get(bm, 0.0) / grand_total_m for bm in benchmarks} \
                     if grand_total_m > 0 else {bm: 1.0 / len(benchmarks) for bm in benchmarks}
     mean_val = sum(bm_weights_m[bm] * data[bm] for bm in benchmarks)
     print("-" * len(header))
-    print(f"{'Mean':<30}  {mean_val:>14.3f}%")
+    print(f"{'Mean':<30}  {mean_val:>16.3f}%")
 
-    generate_tikz(data, bm_baselines, OUTPUT_TEX)
+    generate_tikz(data, bm_broadcasts, OUTPUT_TEX)
 
 
 if __name__ == "__main__":

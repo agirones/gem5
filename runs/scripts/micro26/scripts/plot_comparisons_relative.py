@@ -4,23 +4,20 @@ Generates a standalone PGF/TikZ (pgfplots) grouped bar chart showing the
 reduction in wakeup tag comparisons (in %) of each non-baseline approach
 relative to the baseline.
 
-Per-benchmark value: (1 - approach_rate / baseline_rate) * 100
-where rate = iqWakeupComparisons / committedInsts
+Per-benchmark value: (1 - approach_comps / baseline_comps) * 100
+where comps = weighted mean of raw iqWakeupComparisons across simpoints
+(weight = simpoint weight).
 
-The rightmost group shows the harmonic-mean ratio:
-  HM_ratio = (1 - HM_optimized / HM_baseline) * 100
-where HM_* is the harmonic mean of the per-benchmark rate.
+The rightmost bar shows the weighted arithmetic mean across benchmarks,
+weighted by baseline_comps[bm] / sum(baseline_comps).
 
 stat: system.cpu.iew.iqWakeupComparisons
-      (counts IQ tag comparisons on the broadcast path only,
-       += num_non_ready_operands_iq per broadcast wakeup;
-       EDF/N-Use never broadcast → 0 → 100% reduction)
-normalised by: system.cpu.commitStats0.numInsts
+      (counts IQ tag comparisons on the broadcast path only)
 
 Approaches
 ----------
   Baseline  : runs/output/micro26/baseline/12B_-1P  (reference = 0 %)
-  Sereno    : runs/output/micro26/whisper/1B_2P
+  Sereno    : runs/output/micro26/sereno/ckpt
   EDF-DMT/2 : runs/output/micro26/edf/dmt_slots/2
   2-Use/2   : runs/output/micro26/n-use/ino-i-buffer/i-buffer-head/2
 
@@ -42,8 +39,8 @@ BASELINE_KEY = "Baseline"
 BASELINE_DIR = ROOT / "runs/output/micro26/baseline/12B_-1P"
 
 APPROACHES: dict[str, Path] = {
-    "Sereno":    ROOT / "runs/output/micro26/whisper/1B_2P",
-    "Hybrid-WL": ROOT / "runs/output/micro26/hybrid-wl/12B_2P",
+    "Sereno":    ROOT / "runs/output/micro26/sereno/ckpt",
+    "Hybrid-WL": ROOT / "runs/output/micro26/hybrid-wl/ckpt",
     "N-Use":     ROOT / "runs/output/micro26/n-use/ino-i-buffer/i-buffer-head/2",
     "EDF":       ROOT / "runs/output/micro26/edf/dmt_slots/2",
 }
@@ -52,7 +49,6 @@ OUTPUT_DIR = ROOT / "runs/output/micro26/graphs"
 OUTPUT_TEX = OUTPUT_DIR / "comparisons_relative.tex"
 
 COMP_STAT  = "system.cpu.iew.iqWakeupComparisons"
-INSTR_STAT = "system.cpu.commitStats0.numInsts"
 
 # Colors and patterns match ipc_relative.tex exactly — order matches APPROACHES.
 BAR_COLORS: list[tuple[str, int, int, int]] = [
@@ -87,51 +83,39 @@ def extract_benchmark(stats_file: Path) -> str:
     return stats_file.parent.parent.parent.name
 
 
-def parse_two_stats(stats_file: Path, stat_a: str, stat_b: str):
+def parse_stat(stats_file: Path, stat: str) -> Optional[float]:
     """
-    Return (value_a, value_b) from the final stats dump of a stats.txt file.
-    Returns (None, None) on failure.
+    Return the value of *stat* from the final stats dump of a stats.txt file.
+    Returns None on failure.
     """
     in_dump = False
-    last_a: float | None = None
-    last_b: float | None = None
-    cur_a:  float | None = None
-    cur_b:  float | None = None
+    last:    Optional[float] = None
+    cur:     Optional[float] = None
 
     try:
         with open(stats_file, 'r', errors='replace') as f:
             for line in f:
                 if '---------- Begin Simulation Statistics ----------' in line:
                     in_dump = True
-                    cur_a = cur_b = None
+                    cur = None
                     continue
                 if '---------- End Simulation Statistics   ----------' in line:
-                    if cur_a is not None:
-                        last_a = cur_a
-                    if cur_b is not None:
-                        last_b = cur_b
+                    if cur is not None:
+                        last = cur
                     in_dump = False
                     continue
                 if not in_dump:
                     continue
-                if line.startswith(stat_a):
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        try:
-                            cur_a = float(parts[1])
-                        except ValueError:
-                            pass
-                elif line.startswith(stat_b):
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        try:
-                            cur_b = float(parts[1])
-                        except ValueError:
-                            pass
+                parts = line.split()
+                if len(parts) >= 2 and parts[0] == stat:
+                    try:
+                        cur = float(parts[1])
+                    except ValueError:
+                        pass
     except OSError:
-        return None, None
+        return None
 
-    return last_a, last_b
+    return last
 
 # ---------------------------------------------------------------------------
 # Data collection
@@ -139,45 +123,36 @@ def parse_two_stats(stats_file: Path, stat_a: str, stat_b: str):
 
 def collect_comp_rate(base_dir: Path) -> dict[str, float]:
     """
-    Walk *base_dir* and return {benchmark: weighted_comparisons_per_instr}.
-    comparisons_per_instr = iqWakeupComparisons / committedInsts
+    Walk *base_dir* and return {benchmark: weighted_mean_raw_comparisons}
+    where the weighted mean is sum(weight_i * comps_i) / sum(weight_i)
+    over all simpoints for each benchmark.
     """
-    stats_files = sorted(base_dir.glob("**/stats.txt"))
+    stats_files = sorted(
+        f for f in base_dir.glob("**/stats.txt")
+        if "sensibility_analysis" not in f.parts
+    )
     if not stats_files:
         print(f"  WARNING: no stats.txt found under {base_dir}")
         return {}
 
-    weighted_rate: dict[str, float] = defaultdict(float)
-    weight_sum:   dict[str, float] = defaultdict(float)
+    weighted_comps: dict[str, float] = defaultdict(float)
+    weight_sum:     dict[str, float] = defaultdict(float)
 
     for sf in stats_files:
-        comps, insts = parse_two_stats(sf, COMP_STAT, INSTR_STAT)
+        comps = parse_stat(sf, COMP_STAT)
         if comps is None:
-            print(f"  WARNING: could not parse {COMP_STAT} from {sf}")
-            continue
-        if insts is None or insts == 0:
-            print(f"  WARNING: could not parse {INSTR_STAT} (or zero) from {sf}")
-            continue
-        rate      = comps / insts
+            print(f"  INFO: {COMP_STAT} not found in {sf}, defaulting to 0 (100% reduction)")
+            comps = 0.0
         benchmark = extract_benchmark(sf)
         weight    = extract_weight(sf)
-        weighted_rate[benchmark] += weight * rate
-        weight_sum[benchmark]    += weight
+        weighted_comps[benchmark] += weight * comps
+        weight_sum[benchmark]     += weight
 
     return {
-        bm: weighted_rate[bm] / weight_sum[bm]
-        for bm in weighted_rate
+        bm: weighted_comps[bm] / weight_sum[bm]
+        for bm in weighted_comps
         if weight_sum[bm] > 0
     }
-
-
-def harmonic_mean(values: list[float]) -> float:
-    if not values:
-        return float('nan')
-    pos_recip_sum = sum(1.0 / v for v in values if v > 0)
-    if pos_recip_sum == 0:
-        return 0.0
-    return len(values) / pos_recip_sum
 
 
 def clean_label(benchmark: str) -> str:
@@ -195,7 +170,7 @@ def _escape_latex(s: str) -> str:
 
 
 def generate_tikz(
-    baseline_rates: dict[str, float],
+    baseline_comps: dict[str, float],
     approach_data: dict[str, dict[str, float]],
     output_path: Path,
 ) -> None:
@@ -203,28 +178,34 @@ def generate_tikz(
 
     all_benchmarks: list[str] = sorted(
         {bm for data in approach_data.values() for bm in data}
-        & set(baseline_rates)
+        & set(baseline_comps)
     )
-    x_labels = all_benchmarks + ["HarmonicMean"]
+    x_labels = all_benchmarks + ["WeightedMean"]
     approach_names = list(approach_data.keys())
 
-    baseline_vals_all = [baseline_rates[bm] for bm in all_benchmarks if bm in baseline_rates]
-    hm_baseline = harmonic_mean(baseline_vals_all)
+    grand_total_comps = sum(baseline_comps.get(bm, 0.0) for bm in all_benchmarks)
+    bm_weights = (
+        {bm: baseline_comps.get(bm, 0.0) / grand_total_comps for bm in all_benchmarks}
+        if grand_total_comps > 0
+        else {bm: 1.0 / len(all_benchmarks) for bm in all_benchmarks}
+    )
 
     pct_data: dict[str, dict[str, float]] = {}
     ews_pct:  dict[str, float] = {}
     for name, d in approach_data.items():
         pct: dict[str, float] = {}
-        opt_vals: list[float] = []
         for bm in all_benchmarks:
-            base = baseline_rates.get(bm)
+            base = baseline_comps.get(bm)
             val  = d.get(bm)
             if base is not None and val is not None and base > 0:
                 pct[bm] = (1.0 - val / base) * 100.0
-                opt_vals.append(val)
         pct_data[name] = pct
-        hm_opt = harmonic_mean(opt_vals)
-        ews_pct[name] = (1.0 - hm_opt / hm_baseline) * 100.0 if hm_baseline > 0 else float('nan')
+        present   = [bm for bm in all_benchmarks if bm in pct]
+        tot_w     = sum(bm_weights[bm] for bm in present)
+        ews_pct[name] = (
+            sum(bm_weights[bm] * pct[bm] for bm in present) / tot_w
+            if tot_w > 0 else float('nan')
+        )
 
     coords: dict[str, list[str]] = {}
     for name in approach_names:
@@ -239,7 +220,7 @@ def generate_tikz(
         coords[name] = coord_strs
 
     sym_coords = ", ".join(x_labels)
-    display_labels = [clean_label(lb) for lb in all_benchmarks] + ["Harmonic Mean"]
+    display_labels = [clean_label(lb) for lb in all_benchmarks] + [r"\textbf{Mean}"]
     xticklabels = ", ".join(display_labels)
 
     define_colors = ""
@@ -276,6 +257,9 @@ def generate_tikz(
         r"\usetikzlibrary{patterns}" "\n"
         r"\pgfplotsset{compat=1.18}" "\n"
         "\n"
+        r"\pgfdeclarelayer{background}" "\n"
+        r"\pgfsetlayers{background,main}" "\n"
+        "\n"
         + define_colors +
         "\n"
         r"\pgfplotsset{" "\n"
@@ -288,26 +272,19 @@ def generate_tikz(
         r"\begin{document}" "\n"
         r"\begin{tikzpicture}" "\n"
         r"\begin{axis}[" "\n"
+        r"    width           = 1.3\textwidth, height=4cm, scale only axis," "\n"
         r"    ybar            = 0.5pt," "\n"
         r"    area legend," "\n"
         r"    bar width       = 3.5pt," "\n"
-        r"    width           = 15.5cm," "\n"
-        r"    height          = 6cm," "\n"
         r"    enlarge x limits= 0.03," "\n"
         f"    symbolic x coords = {{{sym_coords}}},\n"
         r"    xtick           = data," "\n"
         f"    xticklabels     = {{{xticklabels}}},\n"
-        r"    x tick label style = {rotate=90, anchor=east, font=\scriptsize}," "\n"
+        r"    x tick label style = {rotate=90, anchor=east}," "\n"
         r"    ymin            =   0," "\n"
         r"    ymax            = 100," "\n"
         r"    ytick           = {0, 20, 40, 60, 80, 100}," "\n"
-        r"    extra y ticks   = {0}," "\n"
-        r"    extra y tick style = {" "\n"
-        r"        grid=major," "\n"
-        r"        grid style={solid, black!50, line width=0.6pt}," "\n"
-        r"    }," "\n"
         r"    ylabel          = {Comparisons reduction}," "\n"
-        r"    ylabel style    = {font=\small}," "\n"
         r"    ymajorgrids     = true," "\n"
         r"    grid style      = {dashed, gray!30}," "\n"
         r"    axis line style = {gray!60}," "\n"
@@ -316,17 +293,16 @@ def generate_tikz(
         r"        at={(0.5,1.03)}, anchor=south," "\n"
         r"        font=\scriptsize," "\n"
         r"        cells={anchor=west}," "\n"
-        r"        draw=gray!50," "\n"
-        r"        fill=white," "\n"
+        r"        draw=none," "\n"
         r"        /tikz/every even column/.append style={column sep=10pt}," "\n"
         r"    }," "\n"
         r"    legend columns  = -1," "\n"
         r"    tick label style= {font=\scriptsize}," "\n"
         r"    yticklabel        = {\pgfmathprintnumber\tick\%}," "\n"
         r"    after end axis/.code={" "\n"
-        r"        \draw[gray!70, dashed, line width=0.8pt]" "\n"
-        r"            ([xshift=-10pt]{axis cs:HarmonicMean,\pgfkeysvalueof{/pgfplots/ymin}})" "\n"
-        r"            -- ([xshift=-10pt]{axis cs:HarmonicMean,\pgfkeysvalueof{/pgfplots/ymax}});" "\n"
+        r"        \begin{pgfonlayer}{background}" "\n"
+        r"        \fill[gray!60] ([xshift=-11pt]{axis cs:WeightedMean,\pgfkeysvalueof{/pgfplots/ymin}}) rectangle (rel axis cs:1,1);" "\n"
+        r"        \end{pgfonlayer}" "\n"
         r"    }," "\n"
         r"]" "\n"
         "\n"
@@ -349,16 +325,16 @@ def main() -> None:
     if not BASELINE_DIR.exists():
         print(f"ERROR: baseline directory not found: {BASELINE_DIR}")
         return
-    print(f"Collecting comparison rates for {BASELINE_KEY} …")
-    baseline_rates = collect_comp_rate(BASELINE_DIR)
-    print(f"  → {len(baseline_rates)} benchmarks found")
+    print(f"Collecting comparison stats for {BASELINE_KEY} …")
+    baseline_comps = collect_comp_rate(BASELINE_DIR)
+    print(f"  → {len(baseline_comps)} benchmarks found")
 
     approach_data: dict[str, dict[str, float]] = {}
     for name, base_dir in APPROACHES.items():
         if not base_dir.exists():
             print(f"SKIP {name}: directory not found ({base_dir})")
             continue
-        print(f"Collecting comparison rates for {name} …")
+        print(f"Collecting comparison stats for {name} …")
         data = collect_comp_rate(base_dir)
         print(f"  → {len(data)} benchmarks found")
         approach_data[name] = data
@@ -368,36 +344,41 @@ def main() -> None:
         return
 
     all_bms = sorted(
-        {bm for d in approach_data.values() for bm in d} & set(baseline_rates)
+        {bm for d in approach_data.values() for bm in d} & set(baseline_comps)
     )
 
     # Print summary table
     header = f"{'Benchmark':<25}" + "".join(f"{n:>14}" for n in approach_data)
     print("\n" + header)
     print("-" * len(header))
-    opt_rate_lists: dict[str, list[float]] = {n: [] for n in approach_data}
     for bm in all_bms:
-        row = f"{bm:<25}"
-        base = baseline_rates.get(bm, float('nan'))
+        row  = f"{bm:<25}"
+        base = baseline_comps.get(bm, float('nan'))
         for name, d in approach_data.items():
-            v = d.get(bm, float('nan'))
-            pct = (1.0 - v / base) * 100.0 if base and base > 0 and v == v else float('nan')
+            v   = d.get(bm, float('nan'))
+            pct = (1.0 - v / base) * 100.0 if base > 0 and v == v else float('nan')
             row += f"{pct:>13.2f}%"
-            if v == v:
-                opt_rate_lists[name].append(v)
         print(row)
 
-    baseline_vals_all = [baseline_rates[bm] for bm in all_bms if bm in baseline_rates]
-    hm_baseline = harmonic_mean(baseline_vals_all)
-    hm_row = f"{'Harmonic Mean':<25}"
-    for name in approach_data:
-        hm_opt = harmonic_mean(opt_rate_lists[name])
-        hm_pct = (1.0 - hm_opt / hm_baseline) * 100.0 if hm_baseline > 0 else float('nan')
-        hm_row += f"{hm_pct:>13.2f}%"
+    grand_total_comps_m = sum(baseline_comps.get(bm, 0.0) for bm in all_bms)
+    bm_weights_m = (
+        {bm: baseline_comps.get(bm, 0.0) / grand_total_comps_m for bm in all_bms}
+        if grand_total_comps_m > 0
+        else {bm: 1.0 / len(all_bms) for bm in all_bms}
+    )
+    wm_row = f"{'Weighted Mean':<25}"
+    for name, d in approach_data.items():
+        present_m = [bm for bm in all_bms if bm in baseline_comps and bm in d and baseline_comps[bm] > 0]
+        tot_w_m   = sum(bm_weights_m[bm] for bm in present_m)
+        wm_pct    = (
+            sum(bm_weights_m[bm] * (1.0 - d[bm] / baseline_comps[bm]) * 100.0 for bm in present_m) / tot_w_m
+            if tot_w_m > 0 else float('nan')
+        )
+        wm_row += f"{wm_pct:>13.2f}%"
     print("-" * len(header))
-    print(hm_row)
+    print(wm_row)
 
-    generate_tikz(baseline_rates, approach_data, OUTPUT_TEX)
+    generate_tikz(baseline_comps, approach_data, OUTPUT_TEX)
 
 
 if __name__ == "__main__":
