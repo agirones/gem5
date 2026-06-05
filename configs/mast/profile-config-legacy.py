@@ -118,6 +118,14 @@ parser.add_argument(
     help="Sets the size of the SQ."
 )
 
+parser.add_argument(
+    "--l1-latency",
+    type=int,
+    required=False,
+    default=1,
+    help="Sets the tag and data latency for the L1I and L1D caches."
+)
+
 args = parser.parse_args()
 
 benchmark = ALL_BENCHMARKS[args.benchmark_num]
@@ -225,8 +233,8 @@ def config_cache(system):
     l1i_config = dict(
         size="32KiB",
         assoc="8",
-        tag_latency="1",
-        data_latency="1",
+        tag_latency=str(args.l1_latency),
+        data_latency=str(args.l1_latency),
 #        tag_latency="4",
 #        data_latency="4",
     )
@@ -234,8 +242,8 @@ def config_cache(system):
     l1d_config = dict(
         size="48KiB",
         assoc="12",
-        tag_latency="1",
-        data_latency="1",
+        tag_latency=str(args.l1_latency),
+        data_latency=str(args.l1_latency),
 #        tag_latency="5",
 #        data_latency="5",
 #        size="32KiB",

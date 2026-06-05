@@ -107,6 +107,14 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--l1-latency",
+    type=lambda x: int_or_default(x, 1),
+    required=False,
+    default=1,
+    help="Sets the tag and data latency for the L1I and L1D caches."
+)
+
+parser.add_argument(
     "--simpoint-num",
     type=int,
     required=False,
@@ -246,6 +254,7 @@ for i in indices:
         "--sq-size", str(args.sq_size),
         "--broadcastMax", str(args.broadcastMax),
         "--dependentsThreshold", str(args.dependentsThreshold),
+        "--l1-latency", str(args.l1_latency),
     ])
 
     result = subprocess.run(cmd)

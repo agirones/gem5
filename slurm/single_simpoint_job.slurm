@@ -18,6 +18,7 @@
 #   N_SLOTS               - (default 2)
 #   BROADCAST_MAX         - (default 12)
 #   DEPENDENTS_THRESHOLD  - (default -1)
+#   L1_LATENCY            - (default 1)
 #   GEM5_CONFIG           - path to gem5 Python config (default: profile-config-legacy.py)
 
 #SBATCH --job-name=gem5_simpoint
@@ -38,13 +39,17 @@ LQ_SIZE="${LQ_SIZE:-256}"
 SQ_SIZE="${SQ_SIZE:-256}"
 BROADCAST_MAX="${BROADCAST_MAX:-12}"
 DEPENDENTS_THRESHOLD="${DEPENDENTS_THRESHOLD:--1}"
+L1_LATENCY="${L1_LATENCY:-1}"
 
 echo "=== gem5 single-simpoint job ==="
 echo "  Job ID    : ${SLURM_JOB_ID}"
 echo "  Benchmark : ${BENCHMARK_NUM}"
 echo "  Simpoint  : ${SIMPOINT_NUM}"
 echo "  CPU width : ${CPU_WIDTH}"
-echo "  IQ/LQ/SQ  : ${IQ_SIZE}/${LQ_SIZE}/${SQ_SIZE}"  echo "  bcastMax  : ${BROADCAST_MAX}  dep-thresh: ${DEPENDENTS_THRESHOLD}"echo "  Output dir: ${OUTPUT_DIR}"
+echo "  IQ/LQ/SQ  : ${IQ_SIZE}/${LQ_SIZE}/${SQ_SIZE}"
+echo "  bcastMax  : ${BROADCAST_MAX}  dep-thresh: ${DEPENDENTS_THRESHOLD}"
+echo "  L1 latency: ${L1_LATENCY}"
+echo "  Output dir: ${OUTPUT_DIR}"
 echo "================================"
 
 mkdir -p "${OUTPUT_DIR}/slurm_logs"
@@ -62,4 +67,5 @@ python3 "${GEM5_ROOT}/configs/mast/invoke-run.py" \
     --lq-size              "${LQ_SIZE}"              \
     --sq-size              "${SQ_SIZE}"              \
     --broadcastMax         "${BROADCAST_MAX}"        \
-    --dependentsThreshold  "${DEPENDENTS_THRESHOLD}"
+    --dependentsThreshold  "${DEPENDENTS_THRESHOLD}" \
+    --l1-latency           "${L1_LATENCY}"
