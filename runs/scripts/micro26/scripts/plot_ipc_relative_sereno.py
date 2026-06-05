@@ -18,8 +18,10 @@ Approaches
   Sereno-SQ  : runs/output/micro26/sereno/sqbcast
   Hybrid-WL  : runs/output/micro26/hybrid-wl/12B_2P
 
-IPC per benchmark is computed as a weighted arithmetic mean over simpoints
+IPC per benchmark is computed as a weighted sum over simpoints:
+    IPC = sum(weight * simInsts) / sum(weight * numCycles)
 (weights are embedded in the simpoint directory names and sum to 1).
+simInsts and system.cpu.numCycles are taken from the final stats dump.
 
 Output: a standalone .tex file importable with \input{} in an Overleaf
 document that uses the 'standalone' package.
@@ -48,7 +50,8 @@ APPROACHES: dict[str, Path] = {
 OUTPUT_DIR = ROOT / "runs/output/micro26/graphs"
 OUTPUT_TEX = OUTPUT_DIR / "ipc_relative_sereno.tex"
 
-IPC_STAT = "system.cpu.ipc"
+INSTS_STAT = "simInsts"
+CYCLES_STAT = "system.cpu.numCycles"
 
 # Colors consistent with plot_ipc_relative.py; Sereno-SQ gets Tableau-20
 # light blue (114, 158, 206) — visually close to Sereno's blue but distinct.
@@ -86,37 +89,46 @@ def extract_benchmark(stats_file: Path) -> str:
     return stats_file.parent.parent.parent.name
 
 
-def parse_ipc(stats_file: Path) -> Optional[float]:
+def parse_stats(stats_file: Path) -> Optional[tuple[float, float]]:
     """
-    Return the IPC value from the final stats dump by scanning line-by-line.
+    Return (simInsts, numCycles) from the final stats dump.
     """
     in_dump = False
-    last_ipc: Optional[float] = None
-    current_ipc: Optional[float] = None
+    last: Optional[tuple[float, float]] = None
+    current_insts: Optional[float] = None
+    current_cycles: Optional[float] = None
 
     try:
         with open(stats_file, 'r', errors='replace') as f:
             for line in f:
                 if '---------- Begin Simulation Statistics ----------' in line:
                     in_dump = True
-                    current_ipc = None
+                    current_insts = current_cycles = None
                     continue
                 if '---------- End Simulation Statistics   ----------' in line:
-                    if current_ipc is not None:
-                        last_ipc = current_ipc
+                    if current_insts is not None and current_cycles is not None:
+                        last = (current_insts, current_cycles)
                     in_dump = False
                     continue
-                if in_dump and line.startswith(IPC_STAT):
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        try:
-                            current_ipc = float(parts[1])
-                        except ValueError:
-                            pass
+                if not in_dump:
+                    continue
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                if parts[0] == INSTS_STAT:
+                    try:
+                        current_insts = float(parts[1])
+                    except ValueError:
+                        pass
+                elif parts[0] == CYCLES_STAT:
+                    try:
+                        current_cycles = float(parts[1])
+                    except ValueError:
+                        pass
     except OSError:
         return None
 
-    return last_ipc
+    return last
 
 # ---------------------------------------------------------------------------
 # Data collection
@@ -125,6 +137,8 @@ def parse_ipc(stats_file: Path) -> Optional[float]:
 def collect_ipc(base_dir: Path) -> dict[str, float]:
     """
     Walk *base_dir* and return {benchmark: weighted_IPC}.
+
+    Per-benchmark IPC = sum(weight * simInsts) / sum(weight * numCycles).
     """
     stats_files = sorted(
         f for f in base_dir.glob("**/stats.txt")
@@ -134,23 +148,27 @@ def collect_ipc(base_dir: Path) -> dict[str, float]:
         print(f"  WARNING: no stats.txt found under {base_dir}")
         return {}
 
-    weighted_ipc: dict[str, float] = defaultdict(float)
-    weight_sum:   dict[str, float] = defaultdict(float)
+    weighted_insts:  dict[str, float] = defaultdict(float)
+    weighted_cycles: dict[str, float] = defaultdict(float)
 
     for sf in stats_files:
-        ipc = parse_ipc(sf)
-        if ipc is None:
-            print(f"  WARNING: could not parse IPC from {sf}")
+        parsed = parse_stats(sf)
+        if parsed is None:
+            print(f"  WARNING: could not parse stats from {sf}")
+            continue
+        insts, cycles = parsed
+        if cycles == 0:
+            print(f"  WARNING: zero cycles in {sf}, skipping")
             continue
         benchmark = extract_benchmark(sf)
         weight    = extract_weight(sf)
-        weighted_ipc[benchmark] += weight * ipc
-        weight_sum[benchmark]   += weight
+        weighted_insts[benchmark]  += weight * insts
+        weighted_cycles[benchmark] += weight * cycles
 
     return {
-        bm: weighted_ipc[bm] / weight_sum[bm]
-        for bm in weighted_ipc
-        if weight_sum[bm] > 0
+        bm: weighted_insts[bm] / weighted_cycles[bm]
+        for bm in weighted_insts
+        if weighted_cycles[bm] > 0
     }
 
 
