@@ -137,6 +137,40 @@ parser.add_argument(
     help="Sets the tag and data latency for the L1I and L1D caches."
 )
 
+parser.add_argument(
+    "--warmup-length",
+    type=int,
+    required=False,
+    default=-1,
+    help="Detailed (O3) warmup length in instructions before the measured "
+         "region. If <0 (default) the warmup is read from the checkpoint "
+         "directory name (legacy behaviour)."
+)
+
+parser.add_argument(
+    "--fast-forward-length",
+    type=int,
+    required=False,
+    default=0,
+    help="Number of instructions to fast-forward in an atomic CPU before the "
+         "detailed warmup begins. 0 (default) keeps the legacy behaviour: "
+         "restore straight into the O3 CPU with no fast-forward and no CPU "
+         "switch. When >0 the run restores into an atomic CPU, fast-forwards "
+         "this many instructions, then switches to the O3 CPU for warmup + "
+         "measurement (caches are flushed at the switch so warmup starts cold)."
+)
+
+parser.add_argument(
+    "--measure-length",
+    type=int,
+    required=False,
+    default=100000000,
+    help="Detailed (O3) measured-region length in instructions. Only used by "
+         "the 'ffrun' mode (fast-forward from the post-boot checkpoint). For "
+         "'simrun' the measured region is fixed by the SimPoint interval baked "
+         "into the checkpoint name and this option is ignored."
+)
+
 args = parser.parse_args()
 
 benchmark = ALL_BENCHMARKS[args.benchmark_num]
@@ -147,7 +181,7 @@ root = os.path.abspath(f"{script_dir}/../..")
 if args.run_base_dir == "_default_run_dir_runs":
     args.run_base_dir = f"{root}/runs/output"
 
-checkpoints = f"{root}/runs/legacy-checkpoints"
+checkpoints = os.getenv("GEM5_POSTBOOT_CPTS", f"{root}/runs/legacy-checkpoints")
 simpoints_dir = f"/cluster/projects/mast/simpoints/simpoints"
 simpoint_cpt_dir = os.getenv("GEM5_CPTS", "/cluster/projects/mast/checkpoints/simpoint-checkpoints")
 
@@ -360,10 +394,23 @@ bm = [SysConfig(
 )]
 
 #(TestCPUClass, test_mem_mode, FutureClass) = Simulation.setCPUClass(args)
-if not args.mode == "simrun":
+# When fast-forwarding we restore into an atomic CPU, advance
+# args.fast_forward_length instructions, then switch to the detailed O3 CPU
+# for warmup + measurement (caches are flushed at the switch so warmup starts
+# cold).  Two modes use this path:
+#   * "ffrun"  always fast-forwards, restoring from the post-boot checkpoint.
+#   * "simrun" fast-forwards only when --fast-forward-length > 0 (otherwise it
+#              restores straight into the O3 CPU: the legacy SimPoint path).
+ff_run = (args.mode == "ffrun")
+fast_forward = ff_run or (args.mode == "simrun" and args.fast_forward_length > 0)
+SwitchCPUClass = None
+if fast_forward:
     (TestCPUClass, test_mem_mode) = Simulation.getCPUClass("X86AtomicSimpleCPU")
-else:
+    (SwitchCPUClass, _) = Simulation.getCPUClass("X86O3CPU")
+elif args.mode == "simrun":
     (TestCPUClass, test_mem_mode) = Simulation.getCPUClass("X86O3CPU")
+else:
+    (TestCPUClass, test_mem_mode) = Simulation.getCPUClass("X86AtomicSimpleCPU")
 
 
 
@@ -377,7 +424,22 @@ cpu_clock = "3GHz"
 
 args.mem_type = "DDR4_2400_8x8"
 
-run_command = \
+if getattr(benchmark, "kind", "spec") == "pyperf":
+    # pyperformance benchmark: run from the pre-built, offline venv tree in the
+    # python disk image (/home/gem5/pyperf). The post-boot checkpoint is taken
+    # at the leading "m5 checkpoint"; everything after it (interpreter startup +
+    # the benchmark) is what the atomic CPU fast-forwards through before the O3
+    # switch in ffrun mode.
+    run_command = \
+          "m5 checkpoint;\n"\
+          "echo 'we have checkpointed';\n"\
+          "cd /home/gem5/pyperf;\n"\
+          f"echo 'Running pyperformance benchmark {benchmark.name}';\n"\
+          f"./tool-venv/bin/python -m pyperformance run -b {benchmark.name} "\
+          f"-o /home/gem5/pyperf/result_{benchmark.name}.json;\n"\
+          "m5 exit;\n"
+else:
+    run_command = \
           "m5 checkpoint;\n"\
           "echo 'we have checkpointed';\n"\
           f"cd /home/gem5/x86-static-17/{benchmark.name};\n"\
@@ -433,7 +495,10 @@ test_sys.cpu = [
 ]
 
 bpClass = ObjectList.bp_list.get("MultiperspectivePerceptronTAGE64KB")
-test_sys.cpu[0].branchPred = bpClass()
+if not fast_forward:
+    # In the fast-forward path the run CPU is atomic (no branch predictor);
+    # the predictor is attached to the O3 switch CPUs instead (see below).
+    test_sys.cpu[0].branchPred = bpClass()
 
 # TODO: find out why Ruby is like this
 if ruby:
@@ -470,7 +535,39 @@ else:
     config_cache(test_sys)
     MemConfig.config_mem(args, test_sys)
 
-config_system(test_sys)
+if fast_forward:
+    # Build the detailed O3 CPUs we switch in after the atomic fast-forward.
+    # They share workload / clock / ISA with the atomic CPUs, start switched
+    # out, and inherit the cache ports + architectural state via takeOverFrom
+    # when m5.switchCpus() runs (so they need no cache/interrupt wiring here).
+    test_sys.switch_cpus = [
+        SwitchCPUClass(clk_domain=test_sys.cpu_clk_domain,
+                       cpu_id=i, switched_out=True)
+        for i in range(num_cpus)
+    ]
+    for i in range(num_cpus):
+        # Do NOT set .system explicitly here: BaseCPU.system defaults to
+        # Param.System(Parent.any), which resolves to test_sys because the
+        # switch CPUs are children of it.  Assigning test_sys before Root()
+        # exists would re-parent test_sys under the CPU (which is itself a
+        # child of test_sys) and create a parent cycle -> RecursionError.
+        test_sys.switch_cpus[i].workload = test_sys.cpu[i].workload
+        test_sys.switch_cpus[i].clk_domain = test_sys.cpu[i].clk_domain
+        test_sys.switch_cpus[i].isa = test_sys.cpu[i].isa
+    test_sys.switch_cpus[0].branchPred = bpClass()
+    for cpu in test_sys.switch_cpus:
+        cpu.createThreads()
+        configure_detailed_cpu(cpu)
+    switch_cpu_list = [
+        (test_sys.cpu[i], test_sys.switch_cpus[i]) for i in range(num_cpus)
+    ]
+elif args.mode == "simrun":
+    # Legacy SimPoint path: the run CPU is the detailed O3 CPU, so apply the
+    # detailed-core configuration directly to it.
+    config_system(test_sys)
+# Otherwise (cpt / profile / simtake) the run CPU is an atomic CPU, which has
+# no O3 structures to configure (configure_detailed_cpu would touch fuPool etc.
+# and fail), so we intentionally skip it here.
 
 # Everything before was getting the system ready
 # We now configure the run
@@ -488,8 +585,12 @@ elif (args.mode == "simtake"):
     simpoint_checkpoint = True
 elif (args.mode == "simrun"):
     simpoint_run = True
+elif (args.mode == "ffrun"):
+    # ff_run already set above; restores the post-boot checkpoint, fast-forwards
+    # in atomic, then switches to O3 for warmup + a fixed measured region.
+    pass
 else:
-    print("Invalid operation mode selected, valid options are cpt, profile, simtake, simrun")
+    print("Invalid operation mode selected, valid options are cpt, profile, simtake, simrun, ffrun")
     exit(1)
 
 # These are control variables
@@ -514,13 +615,45 @@ elif (simpoint_run):
     cpts = [x for x in os.listdir(f"{simpoint_cpt_dir}/{benchmark.name}-cpt") if x.startswith(f"cpt.simpoint_{args.simpoint_num}")]
     assert(len(cpts) == 1)
     cpt_dir = f"{simpoint_cpt_dir}/{benchmark.name}-cpt/{cpts[0]}"
-    warmup_length = cpts[0].split("_")[-1]
-    simpoint_interval = cpts[0].split("_")[-3]
 
-    sim_start_insts = []
-    sim_start_insts.append(warmup_length)
-    sim_start_insts.append(str(int(warmup_length)+int(simpoint_interval)))
-    test_sys.cpu[0].simpoint_start_insts = sim_start_insts
+    # Measured-region length is fixed by the checkpoint geometry.
+    simpoint_interval = int(cpts[0].split("_")[-3])
+
+    # Detailed (O3) warmup length: honour an explicit override when given,
+    # otherwise fall back to the value baked into the checkpoint name (legacy).
+    if args.warmup_length >= 0:
+        warmup_length = args.warmup_length
+    else:
+        warmup_length = int(cpts[0].split("_")[-1])
+
+    if not fast_forward:
+        # Legacy: O3 restores from the checkpoint, warms up, then measures.
+        sim_start_insts = [warmup_length, warmup_length + simpoint_interval]
+        test_sys.cpu[0].simpoint_start_insts = sim_start_insts
+    # For the fast-forward path the warmup/measure markers are scheduled on the
+    # O3 switch CPU *after* the switch (see the simpoint_run loop), and the
+    # atomic CPU is stopped after the fast-forward window via max_insts below.
+
+elif (ff_run):
+    # Fast-forward run from the post-boot checkpoint: restore the (atomic)
+    # post-boot checkpoint, let the benchmark run forward in atomic for
+    # args.fast_forward_length instructions, switch to O3, then warm up and
+    # measure a fixed region.  No SimPoint checkpoint / weights are involved.
+    post_boot = True
+    cpt_dir = f"{checkpoints}/{benchmark.name}-cpt"
+
+    # Detailed (O3) warmup length: honour an explicit override, else 50M.
+    if args.warmup_length >= 0:
+        warmup_length = args.warmup_length
+    else:
+        warmup_length = 50000000
+
+    # Measured-region length is an explicit CLI option for ffrun.
+    measure_length = args.measure_length
+
+    # The warmup/measure markers are scheduled on the O3 switch CPU *after* the
+    # switch (see the ff_run block below); the atomic CPU is stopped after the
+    # fast-forward window via max_insts below.
 
 
 simpoints = []
@@ -536,7 +669,12 @@ if (simpoint_checkpoint):
 #os.mkdir(checkpoint_dir)
 maxinsts = 100000000000
 
-test_sys.cpu[0].max_insts_any_thread = maxinsts
+if fast_forward:
+    # Stop the atomic CPU once the fast-forward window completes so we can
+    # switch to the detailed O3 CPU for warmup + measurement.
+    test_sys.cpu[0].max_insts_any_thread = args.fast_forward_length
+else:
+    test_sys.cpu[0].max_insts_any_thread = maxinsts
 
 root = Root(full_system=True, system=test_sys)
 
@@ -560,25 +698,27 @@ m5.stats.global_dump_roots = stat_root_simobjs
 
 print("**** REAL SIMULATION ****")
 
-if (not post_boot):
-    exit_event = m5.simulate()
-    print(f"Exit event encountered, cause = {exit_event.getCause()}")
-    if (exit_event.getCause() == "m5_exit instruction encountered"):
-        print("Kernel booted most likely, we go back in")
-        exit_event = m5.simulate()
-    print(f"Exit event encountered, cause = {exit_event.getCause()}")
-    if (exit_event.getCause() == "m5_exit instruction encountered"):
-        print("We should be post-boot now. Resetting stats\n"\
-            "Should be running runscript now")
-        m5.stats.reset()
-        exit_event = m5.simulate()
-
 if (checkpoint_post_kernel):
-    exit_event = m5.simulate()
-    print(f"Exit event encountered, cause = {exit_event.getCause()}")
-    if (exit_event.getCause() == "checkpoint"):
-        assert checkpoint_post_kernel, "checkpoint event encountered, but not in that mode"
-        m5.checkpoint(joinpath(m5.options.outdir, f"{benchmark.name}-cpt"))
+    # cpt mode (the only mode with post_boot == False): boot from scratch,
+    # skip the "kernel booted" m5_exit raised by after_boot.sh, and take the
+    # post-boot checkpoint when the run script's leading `m5 checkpoint` fires
+    # (just before the benchmark itself starts). We then stop without running
+    # the benchmark.
+    while True:
+        exit_event = m5.simulate()
+        cause = exit_event.getCause()
+        print(f"Exit event encountered, cause = {cause}")
+        if cause == "checkpoint":
+            cpt_out = joinpath(m5.options.outdir, f"{benchmark.name}-cpt")
+            m5.checkpoint(cpt_out)
+            print(f"Post-boot checkpoint written to {cpt_out}")
+            break
+        elif cause == "m5_exit instruction encountered":
+            print("(kernel-boot / bridge exit; continuing to the run script)")
+            continue
+        else:
+            print(f"Unexpected exit before checkpoint ({cause}); aborting cpt.")
+            break
 
 elif (simpoint_profile):
     exit_event = m5.simulate()
@@ -615,6 +755,25 @@ elif (simpoint_checkpoint):
     print(f"{num_checkpoints} checkpoints taken")
 
 elif (simpoint_run):
+    if fast_forward:
+        # Phase 1: atomic fast-forward of args.fast_forward_length instructions.
+        exit_event = m5.simulate()
+        print(f"Fast-forward complete, cause = {exit_event.getCause()}")
+
+        # Switch to the detailed O3 CPU, then flush the caches so the detailed
+        # warmup begins from a cold microarchitecture (cold caches; the freshly
+        # switched-in O3 also brings a cold pipeline, TLBs and predictor).
+        m5.switchCpus(test_sys, switch_cpu_list)
+        m5.memWriteback(test_sys)
+        m5.memInvalidate(test_sys)
+
+        # Schedule warmup-end and measure-end relative to the live (post-switch)
+        # instruction count, so the markers are robust to the count handed over
+        # from the atomic CPU.
+        test_sys.switch_cpus[0].scheduleSimpointsInstStop(
+            [warmup_length, warmup_length + simpoint_interval]
+        )
+
     exit_event = m5.simulate()
     assert(exit_event.getCause() == "simpoint starting point found")
     print("Warmed up! Dumping and resetting stats!")
@@ -625,3 +784,49 @@ elif (simpoint_run):
         print("Done running SimPoint!")
         sys.exit(exit_event.getCode())
     print(f"Abnormal exit event encountered, cause = {exit_event.getCause()}")
+
+elif (ff_run):
+    # Phase 1: atomic fast-forward of args.fast_forward_length instructions
+    # (the atomic CPU is stopped by max_insts_any_thread set above).
+    exit_event = m5.simulate()
+    print(f"Fast-forward complete, cause = {exit_event.getCause()}")
+    if exit_event.getCause() == "m5_exit instruction encountered":
+        # The benchmark finished before we reached the fast-forward target:
+        # the requested skip is longer than the whole workload. Lower
+        # --fast-forward-length (or profile the benchmark length first).
+        print("Benchmark exited during fast-forward; nothing to measure. "
+              "Reduce --fast-forward-length.")
+        sys.exit(0)
+
+    # Switch to the detailed O3 CPU, then flush the caches so the detailed
+    # warmup begins from a cold microarchitecture (cold caches, pipeline,
+    # TLBs and predictor).
+    m5.switchCpus(test_sys, switch_cpu_list)
+    m5.memWriteback(test_sys)
+    m5.memInvalidate(test_sys)
+
+    # Schedule warmup-end and measure-end relative to the live (post-switch)
+    # instruction count.
+    test_sys.switch_cpus[0].scheduleSimpointsInstStop(
+        [warmup_length, warmup_length + measure_length]
+    )
+
+    exit_event = m5.simulate()
+    if exit_event.getCause() != "simpoint starting point found":
+        print(f"Benchmark exited during O3 warmup, cause = "
+              f"{exit_event.getCause()}. Reduce --warmup-length / "
+              f"--fast-forward-length.")
+        sys.exit(0)
+    print("Warmed up! Dumping and resetting stats!")
+    m5.stats.dump()
+    m5.stats.reset()
+
+    exit_event = m5.simulate()
+    if exit_event.getCause() == "simpoint starting point found":
+        print("Done running measured region!")
+        sys.exit(exit_event.getCode())
+    # Benchmark finished before the full measured region: stats are still valid
+    # for the (shorter) region actually executed.
+    print(f"Measured region ended early, cause = {exit_event.getCause()}")
+    m5.stats.dump()
+    sys.exit(0)

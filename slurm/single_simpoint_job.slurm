@@ -20,6 +20,8 @@
 #   BROADCAST_MAX         - (default 12)
 #   DEPENDENTS_THRESHOLD  - (default -1)
 #   L1_LATENCY            - (default 1)
+#   WARMUP_LENGTH         - detailed O3 warmup insts (default -1 => read from checkpoint name)
+#   FAST_FORWARD_LENGTH   - atomic fast-forward insts before warmup (default 0 => no FF/switch)
 #   GEM5_CONFIG           - path to gem5 Python config (default: profile-config-legacy.py)
 
 #SBATCH --job-name=gem5_simpoint
@@ -42,6 +44,8 @@ SQ_SIZE="${SQ_SIZE:-256}"
 BROADCAST_MAX="${BROADCAST_MAX:-12}"
 DEPENDENTS_THRESHOLD="${DEPENDENTS_THRESHOLD:--1}"
 L1_LATENCY="${L1_LATENCY:-1}"
+WARMUP_LENGTH="${WARMUP_LENGTH:--1}"
+FAST_FORWARD_LENGTH="${FAST_FORWARD_LENGTH:-0}"
 
 echo "=== gem5 single-simpoint job ==="
 echo "  Job ID    : ${SLURM_JOB_ID}"
@@ -52,6 +56,7 @@ echo "  Core scale: ${CORE_SCALE}"
 echo "  IQ/LQ/SQ  : ${IQ_SIZE}/${LQ_SIZE}/${SQ_SIZE}"
 echo "  bcastMax  : ${BROADCAST_MAX}  dep-thresh: ${DEPENDENTS_THRESHOLD}"
 echo "  L1 latency: ${L1_LATENCY}"
+echo "  warmup    : ${WARMUP_LENGTH}  fast-fwd: ${FAST_FORWARD_LENGTH}"
 echo "  Output dir: ${OUTPUT_DIR}"
 echo "================================"
 
@@ -72,4 +77,6 @@ python3 "${GEM5_ROOT}/configs/mast/invoke-run.py" \
     --sq-size              "${SQ_SIZE}"              \
     --broadcastMax         "${BROADCAST_MAX}"        \
     --dependentsThreshold  "${DEPENDENTS_THRESHOLD}" \
-    --l1-latency           "${L1_LATENCY}"
+    --l1-latency           "${L1_LATENCY}"           \
+    --warmup-length        "${WARMUP_LENGTH}"        \
+    --fast-forward-length  "${FAST_FORWARD_LENGTH}"

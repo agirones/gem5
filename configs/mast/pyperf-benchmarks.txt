@@ -1,0 +1,107 @@
+# pyperformance benchmark names available in the python disk image
+# (/home/gem5/pyperf, built for the guest's python3.12). One name per line.
+# The line number (0-based, ignoring comments/blanks) is the --benchmark-num
+# index when GEM5_BENCH_SET=pyperf.
+#
+# NOTE: the async_*/asyncio_*/tornado_http/fastapi/networkx network/event-loop
+# benchmarks may behave oddly under single-core full-system gem5; the plain
+# CPU-bound ones (float, nbody, chaos, go, richards, raytrace, fannkuch,
+# spectral_norm, nqueens, pidigits, regex_*, json_*, pickle*, sqlglot_v2*,
+# sympy, scimark, ...) are the most natural fit.
+2to3
+argparse
+argparse_subparsers
+async_generators
+async_tree
+async_tree_cpu_io_mixed
+async_tree_cpu_io_mixed_tg
+async_tree_eager
+async_tree_eager_cpu_io_mixed
+async_tree_eager_cpu_io_mixed_tg
+async_tree_eager_io
+async_tree_eager_io_tg
+async_tree_eager_memoization
+async_tree_eager_memoization_tg
+async_tree_eager_tg
+async_tree_io
+async_tree_io_tg
+async_tree_memoization
+async_tree_memoization_tg
+async_tree_tg
+asyncio_tcp
+asyncio_tcp_ssl
+asyncio_websockets
+base64
+bpe_tokeniser
+chameleon
+chaos
+comprehensions
+concurrent_imap
+coroutines
+coverage
+crypto_pyaes
+dask
+deepcopy
+deltablue
+django_template
+docutils
+dulwich_log
+fannkuch
+fastapi
+float
+gc_collect
+gc_traversal
+generators
+genshi
+go
+hexiom
+html5lib
+json_dumps
+json_loads
+logging
+mako
+mdp
+meteor_contest
+nbody
+networkx
+networkx_connected_components
+networkx_k_core
+nqueens
+pathlib
+pickle
+pickle_dict
+pickle_list
+pickle_pure_python
+pidigits
+pprint
+pyflate
+python_startup
+python_startup_no_site
+raytrace
+regex_compile
+regex_dna
+regex_effbot
+regex_v8
+richards
+richards_super
+scimark
+spectral_norm
+sphinx
+sqlalchemy_declarative
+sqlalchemy_imperative
+sqlglot_v2
+sqlglot_v2_optimize
+sqlglot_v2_parse
+sqlglot_v2_transpile
+sqlite_synth
+sympy
+telco
+tomli_loads
+tornado_http
+typing_runtime_protocols
+unpack_sequence
+unpickle
+unpickle_list
+unpickle_pure_python
+xdsl
+xml_etree

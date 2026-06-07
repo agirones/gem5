@@ -124,6 +124,34 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--warmup-length",
+    type=lambda x: int_or_default(x, -1),
+    required=False,
+    default=-1,
+    help="Detailed (O3) warmup length in instructions. <0 (default) reads the "
+         "warmup from the checkpoint name (legacy behaviour)."
+)
+
+parser.add_argument(
+    "--fast-forward-length",
+    type=lambda x: int_or_default(x, 0),
+    required=False,
+    default=0,
+    help="Atomic fast-forward length in instructions before the O3 warmup. "
+         "0 (default) keeps the legacy behaviour (no fast-forward / no CPU "
+         "switch)."
+)
+
+parser.add_argument(
+    "--measure-length",
+    type=lambda x: int_or_default(x, 100000000),
+    required=False,
+    default=100000000,
+    help="Detailed (O3) measured-region length in instructions. Only used by "
+         "the 'ffrun' mode."
+)
+
+parser.add_argument(
     "--simpoint-num",
     type=int,
     required=False,
@@ -209,6 +237,57 @@ if args.mode == "cpt":
     cleanup()
     exit(0)
 
+if args.mode == "ffrun":
+    # Fast-forward run from the post-boot checkpoint: a single detailed run per
+    # benchmark (no SimPoint loop). Restores {GEM5_CPTS}/<bench>-cpt indirectly
+    # via the gem5 config, fast-forwards in atomic, switches to O3, warms up,
+    # then measures --measure-length instructions.
+    work_dir = f"{args.output_dir}/width{args.cpu_width}/{benchmark.name}"
+    os.makedirs(work_dir, exist_ok=True)
+    os.chdir(work_dir)
+
+    container_path = "/cluster/home/andreug/research/EECS-NTNU/gem5-NTNU/mast_gem5.sif"
+    binary_type = "gem5.debug" if args.gdb else "gem5.opt"
+    executable = f"{root}/build/X86/{binary_type}"
+
+    cmd = ["apptainer", "exec", "-B", "/cluster:/cluster"]
+    # Forward the GEM5_* environment (benchmark set, disk image, checkpoint
+    # locations, kernel) into the container so the gem5 config sees them.
+    for key in ("GEM5_BENCH_SET", "GEM5_DISK", "GEM5_KERNEL",
+                "GEM5_POSTBOOT_CPTS", "GEM5_CPTS", "GEM5_ROOT"):
+        val = os.getenv(key)
+        if val is not None:
+            cmd.extend(["--env", f"{key}={val}"])
+    cmd.append(container_path)
+    if args.gdb:
+        cmd.extend(["gdb", "--args"])
+    cmd.append(executable)
+    cmd.extend([
+        f"{args.config}",
+        "--benchmark-num", str(args.benchmark_num),
+        "--mode", "ffrun",
+        "--cpu-width", str(args.cpu_width),
+        "--core-scale", str(args.core_scale),
+        "--run-base-dir", args.output_dir,
+        "--iq-size", str(args.iq_size),
+        "--lq-size", str(args.lq_size),
+        "--sq-size", str(args.sq_size),
+        "--broadcastMax", str(args.broadcastMax),
+        "--dependentsThreshold", str(args.dependentsThreshold),
+        "--l1-latency", str(args.l1_latency),
+        "--warmup-length", str(args.warmup_length),
+        "--fast-forward-length", str(args.fast_forward_length),
+        "--measure-length", str(args.measure_length),
+    ])
+
+    result = subprocess.run(cmd)
+    stats_path = os.path.join(os.getcwd(), "m5out", "stats.txt")
+    if result.returncode != 0 and not os.path.exists(stats_path):
+        print(f"Critical Error: gem5 crashed and NO stats found at {stats_path}.")
+        sys.exit(1)
+    cleanup()
+    exit(0)
+
 if not args.mode == "simrun":
     setup_run_dir()
     subprocess.run([f"{root}/build/X86/gem5.opt",
@@ -266,6 +345,8 @@ for i in indices:
         "--broadcastMax", str(args.broadcastMax),
         "--dependentsThreshold", str(args.dependentsThreshold),
         "--l1-latency", str(args.l1_latency),
+        "--warmup-length", str(args.warmup_length),
+        "--fast-forward-length", str(args.fast_forward_length),
     ])
 
     result = subprocess.run(cmd)
