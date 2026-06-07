@@ -39,6 +39,7 @@
  */
 
 #include "cpu/o3/dyn_inst.hh"
+#include "cpu/o3/limits.hh"
 
 #include <algorithm>
 
@@ -74,12 +75,12 @@ DynInst::DynInst(const Arrays &arrays, const StaticInstPtr &static_inst,
 #ifndef NDEBUG
     ++cpu->instcount;
 
-    if (cpu->instcount > 1500) {
+    if (cpu->instcount > MaxDynInsts) {
 #ifdef GEM5_DEBUG
         cpu->dumpInsts();
         dumpSNList();
 #endif
-        assert(cpu->instcount <= 1500);
+        assert(cpu->instcount <= MaxDynInsts);
     }
 
     DPRINTF(DynInst,

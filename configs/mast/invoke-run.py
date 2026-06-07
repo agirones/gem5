@@ -44,6 +44,15 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--core-scale",
+    type=lambda x: float(x) if x not in ("", None) else 1.0,
+    required=False,
+    default=1.0,
+    help="Scale factor for the detailed core (widths, IQ/LQ/SQ, ROB, phys "
+         "regs). 1.0 = baseline, 1.5 = x1.5, 2.0 = double, 4.0 = quadruple."
+)
+
+parser.add_argument(
     "--output-dir",
     type=str,
     required=False,
@@ -195,6 +204,7 @@ if args.mode == "cpt":
                     "--mode", "simrun",
                     "--simpoint-num", str(args.cpt),
                     "--cpu-width", str(args.cpu_width),
+                    "--core-scale", str(args.core_scale),
                     "--run-base-dir", args.output_dir])
     cleanup()
     exit(0)
@@ -248,6 +258,7 @@ for i in indices:
         "--mode", args.mode,
         "--simpoint-num", str(i),
         "--cpu-width", str(args.cpu_width),
+        "--core-scale", str(args.core_scale),
         "--run-base-dir", args.output_dir,
         "--iq-size", str(args.iq_size),
         "--lq-size", str(args.lq_size),

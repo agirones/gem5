@@ -73,6 +73,17 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--core-scale",
+    type=float,
+    required=False,
+    default=1.0,
+    help="Scale factor applied to the detailed core's superscalar widths and "
+         "structure sizes (fetch/decode/.../commit widths, IQ/LQ/SQ, ROB and "
+         "physical register files). 1.0 = baseline, 1.5 = x1.5, 2.0 = double, "
+         "4.0 = quadruple."
+)
+
+parser.add_argument(
     "--run-base-dir", type=str,
     default="_default_run_dir_runs",
     help="Base directory for simulation runs (e.g., 'my_sims' or 'data/runs')"
@@ -156,41 +167,51 @@ kernel_cmd = " ".join([
 kernel = os.getenv("GEM5_KERNEL", "/cluster/projects/mast/full-system/kernels/x86-linux-kernel-5.4.0-105-generic")
 
 
+def configure_detailed_cpu(cpu):
+#    for fupool in cpu.fuPool.FUList:
+#        fupool.count = 8
+
+    fu_list = cpu.fuPool.FUList[0].count = 8 # IntAlu
+    fu_list = cpu.fuPool.FUList[1].count = 2 # IntMultDiv
+    fu_list = cpu.fuPool.FUList[3].count = 3 # ReadPort
+    fu_list = cpu.fuPool.FUList[4].count = 2 # SIMD_Unit
+    fu_list = cpu.fuPool.FUList[6].count = 2 # PredALU
+    fu_list = cpu.fuPool.FUList[7].count = 0 # WritePort
+
+    # Scale the core's widths and structure sizes by --core-scale so the same
+    # config can model a bigger core (1.5x / 2x / 4x ...). Results are rounded
+    # to the nearest integer and clamped to >= 1.
+    def scaled(base):
+        return max(1, int(round(base * args.core_scale)))
+
+    cpu.fetchWidth = scaled(10)
+    cpu.decodeWidth = scaled(10)
+    cpu.renameWidth = scaled(10)
+    cpu.dispatchWidth = scaled(10)
+    cpu.issueWidth = scaled(12)
+    cpu.wbWidth = scaled(12)
+    cpu.commitWidth = scaled(12)
+
+    cpu.numIQEntries = scaled(args.iq_size)
+    cpu.numPhysFloatRegs = scaled(630)
+    cpu.numPhysIntRegs = scaled(630)
+    cpu.numROBEntries = scaled(630)
+    cpu.LQEntries = scaled(args.lq_size)
+    cpu.SQEntries = scaled(args.sq_size)
+
+    cpu.backComSize = 30
+    cpu.forwardComSize = 512
+
+    cpu.branchPred.btb.numEntries = 8192
+    cpu.branchPred.btb.associativity = 4
+
+    cpu.broadcastMax = args.broadcastMax
+    cpu.dependentsThreshold = args.dependentsThreshold
+
+
 def config_system(system):
     for cpu in system.cpu:
-#        for fupool in cpu.fuPool.FUList:
-#            fupool.count = 8
-        
-        fu_list = cpu.fuPool.FUList[0].count = 8 # IntAlu
-        fu_list = cpu.fuPool.FUList[1].count = 2 # IntMultDiv
-        fu_list = cpu.fuPool.FUList[3].count = 3 # ReadPort
-        fu_list = cpu.fuPool.FUList[4].count = 2 # SIMD_Unit
-        fu_list = cpu.fuPool.FUList[6].count = 2 # PredALU
-        fu_list = cpu.fuPool.FUList[7].count = 0 # WritePort
-
-        cpu.fetchWidth = 10
-        cpu.decodeWidth = 10
-        cpu.renameWidth = 10
-        cpu.dispatchWidth = 10
-        cpu.issueWidth = 12
-        cpu.wbWidth = 12
-        cpu.commitWidth = 12
-
-        cpu.numIQEntries = args.iq_size
-        cpu.numPhysFloatRegs = 630
-        cpu.numPhysIntRegs = 630
-        cpu.numROBEntries = 630
-        cpu.LQEntries = args.lq_size
-        cpu.SQEntries = args.sq_size
-
-        cpu.backComSize = 30
-        cpu.forwardComSize = 512
-
-        cpu.branchPred.btb.numEntries = 8192
-        cpu.branchPred.btb.associativity = 4
-
-        cpu.broadcastMax = args.broadcastMax
-        cpu.dependentsThreshold = args.dependentsThreshold
+        configure_detailed_cpu(cpu)
 
 
 #test_sys.init_param = args.init_param

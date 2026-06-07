@@ -34,8 +34,12 @@ namespace gem5
 namespace o3
 {
 
-static constexpr int MaxWidth = 12;
+static constexpr int MaxWidth = 64;
 static constexpr int MaxThreads = 4;
+// Upper bound on concurrently live DynInst objects (debug leak check in
+// dyn_inst.cc).  Must exceed ROB + IQ + frontend buffering at the largest
+// supported core scale (4x baseline => ~2520 ROB + ~1024 IQ + pipeline).
+static constexpr int MaxDynInsts = 8192;
 
 } // namespace o3
 } // namespace gem5

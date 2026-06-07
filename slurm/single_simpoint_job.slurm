@@ -10,6 +10,7 @@
 #   GEM5_ROOT       - path to the gem5 repository root
 #
 # Optional environment variables (defaults match invoke-run.py defaults):
+#   CORE_SCALE      - core scale factor (default 1.0; 1.5/2.0/4.0 for bigger cores)
 #   I_BUFFER_HEAD   - (default 1)
 #   I_BUFFER_SIZE   - (default 256)
 #   IQ_SIZE         - (default 256)
@@ -34,6 +35,7 @@ module load Python/3.12.3-GCCcore-13.3.0
 GEM5_ROOT="${GEM5_ROOT:-/cluster/home/andreug/research/EECS-NTNU/gem5-NTNU}"
 GEM5_CONFIG="${GEM5_CONFIG:-${GEM5_ROOT}/configs/mast/profile-config-legacy.py}"
 
+CORE_SCALE="${CORE_SCALE:-1.0}"
 IQ_SIZE="${IQ_SIZE:-256}"
 LQ_SIZE="${LQ_SIZE:-256}"
 SQ_SIZE="${SQ_SIZE:-256}"
@@ -46,6 +48,7 @@ echo "  Job ID    : ${SLURM_JOB_ID}"
 echo "  Benchmark : ${BENCHMARK_NUM}"
 echo "  Simpoint  : ${SIMPOINT_NUM}"
 echo "  CPU width : ${CPU_WIDTH}"
+echo "  Core scale: ${CORE_SCALE}"
 echo "  IQ/LQ/SQ  : ${IQ_SIZE}/${LQ_SIZE}/${SQ_SIZE}"
 echo "  bcastMax  : ${BROADCAST_MAX}  dep-thresh: ${DEPENDENTS_THRESHOLD}"
 echo "  L1 latency: ${L1_LATENCY}"
@@ -61,6 +64,7 @@ python3 "${GEM5_ROOT}/configs/mast/invoke-run.py" \
     --mode           simrun              \
     --simpoint-num   "${SIMPOINT_NUM}"   \
     --cpu-width      "${CPU_WIDTH}"      \
+    --core-scale     "${CORE_SCALE}"     \
     --output-dir     "${OUTPUT_DIR}"     \
     --config         "${GEM5_CONFIG}"    \
     --iq-size        "${IQ_SIZE}"        \
