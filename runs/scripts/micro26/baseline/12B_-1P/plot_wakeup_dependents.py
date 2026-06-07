@@ -302,15 +302,26 @@ def generate_tikz(data: dict[str, dict[str, float]], output_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Plot wakeup dependents distribution.")
     parser.add_argument(
+        "--data-dir", type=Path, default=DATA_DIR,
+        help="Root directory to search for stats.txt (default: 12B_-1P/width8)",
+    )
+    parser.add_argument(
+        "--output", type=Path, default=OUTPUT_TEX,
+        help="Output .tex file path (default: 12B_-1P/graphs/wakeup_dependents.tex)",
+    )
+    parser.add_argument(
         "--debug", metavar="BENCHMARK", default="",
         help="Print per-simpoint raw counts and calculations for this benchmark (e.g. 600.perlbench_s)",
     )
     args = parser.parse_args()
 
-    print(f"Collecting wakeupDependents stats from {DATA_DIR} ...")
+    data_dir = args.data_dir.resolve()
+    output_tex = args.output.resolve()
+
+    print(f"Collecting wakeupDependents stats from {data_dir} ...")
     if args.debug:
         print(f"DEBUG mode: showing all numbers for '{args.debug}'\n")
-    data = collect_data(DATA_DIR, debug_bm=args.debug)
+    data = collect_data(data_dir, debug_bm=args.debug)
     if not data:
         print("No data found – nothing to plot.")
         return
@@ -339,7 +350,7 @@ def main() -> None:
     print("-" * len(header))
     print(f"{'Mean':<30}" + "".join(f"{v:>11.2f}%" for v in means))
 
-    generate_tikz(data, OUTPUT_TEX)
+    generate_tikz(data, output_tex)
 
 
 if __name__ == "__main__":
