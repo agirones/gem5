@@ -227,8 +227,8 @@ def configure_detailed_cpu(cpu):
     cpu.commitWidth = scaled(12)
 
     cpu.numIQEntries = scaled(args.iq_size)
-    cpu.numPhysFloatRegs = scaled(630)
-    cpu.numPhysIntRegs = scaled(630)
+    cpu.numPhysFloatRegs = scaled(512)
+    cpu.numPhysIntRegs = scaled(512)
     cpu.numROBEntries = scaled(630)
     cpu.LQEntries = scaled(args.lq_size)
     cpu.SQEntries = scaled(args.sq_size)
