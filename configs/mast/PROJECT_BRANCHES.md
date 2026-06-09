@@ -6,6 +6,9 @@ which git branch, and what kind of change belongs where.
 For simulation mechanics (checkpoints, SimPoints, Apptainer, `invoke-run.py`),
 see [SIMULATION_WORKFLOW.md](SIMULATION_WORKFLOW.md).
 
+For parallel checkouts of implementation branches (git worktrees) and the
+shared `runs/output` symlink, see [GIT_WORKTREES.md](GIT_WORKTREES.md).
+
 ---
 
 ## 1. Branch hierarchy
