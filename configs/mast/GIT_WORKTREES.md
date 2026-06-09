@@ -46,6 +46,9 @@ symlink in every checkout.
 │       ├── scripts/                 ← tracked by git
 │       └── output → ../../output       ← symlink (not tracked)
 │
+├── gem5-NTNU-baseline/              ← worktree  [baseline]
+│   └── runs/output → ../../output
+│
 ├── gem5-NTNU-sereno/                ← worktree  [sereno]
 │   └── runs/output → ../../output
 │
@@ -79,6 +82,7 @@ symlink in every checkout.
 | Implementation | Git branch | Worktree directory |
 |---|---|---|
 | Baseline / shared infra | `infra` | `gem5-NTNU` (main) |
+| Baseline (parallel runs) | `baseline` | `gem5-NTNU-baseline` |
 | Sereno | `sereno` | `gem5-NTNU-sereno` |
 | EDF | `explicit-data-forwarding` | `gem5-NTNU-explicit-data-forwarding` |
 | Hybrid-WL | `hybrid-wl` | `gem5-NTNU-hybrid-wl` |
@@ -87,6 +91,31 @@ symlink in every checkout.
 
 Optional analysis branches (`sereno-sqbcast`, `sereno-stale`) only need a
 worktree while actively in use.
+
+### Baseline parallel worktree (`baseline` branch)
+
+Baseline and Sereno share the **same gem5 binary** (see PROJECT_BRANCHES.md);
+only run parameters differ (`broadcastMax=12`, `dependentsThreshold=-1` vs
+`1`/`2`). Git allows only one checkout per branch, so a second worktree for
+baseline runs uses a **`baseline` branch** pointing at the same commit as
+`sereno`:
+
+```bash
+git branch baseline sereno
+./configs/mast/setup-worktree.sh add baseline
+```
+
+`gem5-NTNU-baseline` and `gem5-NTNU-sereno` then have identical trees but
+separate `build/` directories and can run SLURM jobs in parallel. After
+rebasing `sereno`, fast-forward the alias:
+
+```bash
+git branch -f baseline sereno
+cd ../gem5-NTNU-baseline && git reset --hard baseline
+```
+
+Baseline **scripts** still live on `infra`; use `GEM5_ROOT` pointing at
+`gem5-NTNU-baseline` when submitting baseline-parameter jobs.
 
 **Git rule:** each branch can be checked out in **at most one** worktree at a
 time. You cannot have two worktrees both on `explicit-data-forwarding`.
