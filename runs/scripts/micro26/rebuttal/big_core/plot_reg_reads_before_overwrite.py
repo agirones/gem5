@@ -1,0 +1,428 @@
+#!/usr/bin/env python3
+"""
+Generates a standalone PGF/TikZ (pgfplots) stacked bar chart showing, per
+benchmark, the distribution (in %) of register lifetimes by how many times
+the value was read at rename before being overwritten: 0, 1, 2, or 3-or-more.
+
+Data source
+-----------
+  system.cpu.rename.readsBeforeOverwrite::*
+    committed-path only (reads credited at commit, lifetime sampled when the
+    old physical register is freed)
+
+  system.cpu.rename.readsBeforeOverwriteWrongPath::*
+    includes wrong-path rename-time reads (sampled at overwrite time)
+
+Read from:
+  runs/output/micro26/rebuttal/big_core/{impl}/4.0x/width8/{benchmark}/{simpoint}/m5out/stats.txt
+
+Per-benchmark value: weighted arithmetic mean over simpoints.
+The rightmost bar is the arithmetic mean across all benchmarks.
+
+Output:
+  runs/output/micro26/rebuttal/big_core/{impl}/4.0x/graphs/reg_reads_before_overwrite.tex
+"""
+
+import argparse
+import re
+from collections import defaultdict
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[5]  # .../gem5-NTNU/
+
+BIG_CORE_DIR = ROOT / "runs/output/micro26/rebuttal/big_core"
+
+STAT_PREFIXES = {
+    "committed": "system.cpu.rename.readsBeforeOverwrite",
+    "wrong_path": "system.cpu.rename.readsBeforeOverwriteWrongPath",
+}
+
+CATEGORY_SUFFIXES = ["0", "1", "2", "3_or_more"]
+
+CATEGORY_LABELS = ["0", "1", "2", r"3 or more"]
+
+
+def stat_keys(mode: str) -> list[str]:
+    prefix = STAT_PREFIXES[mode]
+    return [f"{prefix}::{suffix}" for suffix in CATEGORY_SUFFIXES]
+
+
+def extract_weight(path: Path) -> float:
+    m = re.search(r"weight_([0-9]+\.[0-9]+)", str(path))
+    return float(m.group(1)) if m else 1.0
+
+
+def parse_stats(stats_file: Path, stat_keys_list: list[str]) -> dict[str, float]:
+    in_dump = False
+    current: dict[str, float] = {}
+    last: dict[str, float] = {}
+
+    with open(stats_file, "r", errors="replace") as f:
+        for line in f:
+            if "---------- Begin Simulation Statistics ----------" in line:
+                in_dump = True
+                current = {}
+                continue
+            if "---------- End Simulation Statistics   ----------" in line:
+                if current:
+                    last = current
+                in_dump = False
+                continue
+            if not in_dump:
+                continue
+            for key in stat_keys_list:
+                if line.startswith(key + " ") or line.startswith(key + "\t"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            current[key] = float(parts[1])
+                        except ValueError:
+                            pass
+    return last
+
+
+def collect_data(
+    base_dir: Path,
+    stat_keys_list: list[str],
+    debug_bm: str = "",
+) -> dict[str, dict[str, float]]:
+    """Return {benchmark: {stat_key: weighted_sum}} — raw weighted sums over simpoints."""
+    if not base_dir.exists():
+        print(f"ERROR: data directory not found: {base_dir}")
+        return {}
+
+    stats_files = sorted(base_dir.glob("**/stats.txt"))
+    if not stats_files:
+        print(f"WARNING: no stats.txt found under {base_dir}")
+        return {}
+
+    weighted: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    short = [k.split("::")[1] for k in stat_keys_list]
+
+    for sf in stats_files:
+        benchmark = sf.parent.parent.parent.name
+        weight = extract_weight(sf.parent.parent.name)
+        vals = parse_stats(sf, stat_keys_list)
+        if not vals:
+            print(f"  WARNING: no register read-lifetime stats in {sf}")
+            continue
+
+        if debug_bm and benchmark == debug_bm:
+            raw = [vals.get(k, 0.0) for k in stat_keys_list]
+            total_r = sum(raw)
+            print(f"  simpoint : {sf.parent.parent.name}")
+            print(f"  weight   : {weight}")
+            print("  raw counts  : " + "  ".join(f"{s}={v:.0f}" for s, v in zip(short, raw)))
+            print(f"  raw total   : {total_r:.0f}")
+            if total_r > 0:
+                print("  raw pct     : " + "  ".join(
+                    f"{s}={100 * v / total_r:.2f}%" for s, v in zip(short, raw)
+                ))
+            print("  weighted    : " + "  ".join(
+                f"{s}={weight * v:.2f}" for s, v in zip(short, raw)
+            ))
+            print()
+
+        for key in stat_keys_list:
+            if key in vals:
+                weighted[benchmark][key] += weight * vals[key]
+
+    result: dict[str, dict[str, float]] = {}
+    for bm, d in weighted.items():
+        result[bm] = dict(d)
+
+    if debug_bm and debug_bm in weighted:
+        print(f"  --- Aggregated for {debug_bm} ---")
+        wm = result[debug_bm]
+        total_wm = sum(wm.values())
+        print("  weighted sums   : " + "  ".join(
+            f"{s}={wm[k]:.2f}" for s, k in zip(short, stat_keys_list)
+        ))
+        print(f"  weighted sum total : {total_wm:.4f}")
+        pct = [100.0 * wm[k] / total_wm for k in stat_keys_list] if total_wm > 0 else [0.0] * 4
+        print("  final pct       : " + "  ".join(
+            f"{s}={p:.2f}%" for s, p in zip(short, pct)
+        ))
+        print()
+
+    return result
+
+
+def clean_label(name: str) -> str:
+    label = re.sub(r"^\d+\.", "", name)
+    label = re.sub(r"_s$", "", label)
+    return label
+
+
+def to_percentages(vals: dict[str, float], stat_keys_list: list[str]) -> list[float]:
+    counts = [vals.get(k, 0.0) for k in stat_keys_list]
+    total = sum(counts)
+    if total <= 0:
+        return [0.0] * len(stat_keys_list)
+    return [100.0 * c / total for c in counts]
+
+
+def generate_tikz(
+    data: dict[str, dict[str, float]],
+    output_path: Path,
+    stat_keys_list: list[str],
+    ylabel: str,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    benchmarks = sorted(data.keys())
+
+    pct_data: dict[str, list[float]] = {}
+    for bm in benchmarks:
+        pct_data[bm] = to_percentages(data[bm], stat_keys_list)
+
+    bm_totals = {bm: sum(data[bm].get(k, 0.0) for k in stat_keys_list) for bm in benchmarks}
+    grand_total = sum(bm_totals.values())
+    bm_weights = (
+        {bm: bm_totals[bm] / grand_total for bm in benchmarks}
+        if grand_total > 0
+        else {bm: 1.0 / len(benchmarks) for bm in benchmarks}
+    )
+
+    weighted_cat = [
+        sum(bm_weights[bm] * data[bm].get(stat_keys_list[i], 0.0) for bm in benchmarks)
+        for i in range(len(stat_keys_list))
+    ]
+    total_wc = sum(weighted_cat)
+    mean_pct = (
+        [100.0 * c / total_wc for c in weighted_cat]
+        if total_wc > 0
+        else [0.0] * len(stat_keys_list)
+    )
+
+    x_labels = benchmarks + ["Mean"]
+    display_labels = [clean_label(bm) for bm in benchmarks] + [r"\textbf{Mean}"]
+    sym_coords = ", ".join(x_labels)
+    xticklabels = ", ".join(display_labels)
+
+    colors = [
+        ("clrRead0", "352A86"),
+        ("clrRead1", "2C92A1"),
+        ("clrRead2", "8DCB6E"),
+        ("clrRead3", "F6C96B"),
+    ]
+    patterns = [
+        None,
+        "dots",
+        "north east lines",
+        "crosshatch",
+    ]
+    pattern_colors = [
+        None,
+        "black!40",
+        "black!40",
+        "white!30",
+    ]
+
+    define_colors = ""
+    for cname, hex_val in colors:
+        r = int(hex_val[0:2], 16)
+        g = int(hex_val[2:4], 16)
+        b = int(hex_val[4:6], 16)
+        define_colors += f"\\definecolor{{{cname}}}{{RGB}}{{{r},{g},{b}}}\n"
+
+    addplot_lines = []
+    for i, cat_label in enumerate(CATEGORY_LABELS):
+        cname = colors[i][0]
+        pat = patterns[i]
+        patcol = pattern_colors[i]
+
+        coords = []
+        for bm in benchmarks:
+            coords.append(f"({bm}, {pct_data[bm][i]:.4f})")
+        coords.append(f"(Mean, {mean_pct[i]:.4f})")
+        coord_body = "\n        ".join(coords)
+
+        if pat:
+            postaction = (
+                f",\n        postaction={{pattern={pat},"
+                f" pattern color={patcol}}}"
+            )
+        else:
+            postaction = ""
+
+        escaped = cat_label.replace("_", r"\_")
+        addplot_lines.append(
+            f"    \\addplot[\n"
+            f"        fill={cname},\n"
+            f"        draw=black!60,\n"
+            f"        line width=0.3pt{postaction},\n"
+            f"    ] coordinates {{\n"
+            f"        {coord_body}\n"
+            f"    }};\n"
+            f"    \\addlegendentry{{{escaped}}}"
+        )
+
+    addplot_str = "\n\n".join(addplot_lines)
+
+    tex = (
+        r"\documentclass[tikz]{standalone}" "\n"
+        r"\usepackage{pgfplots}" "\n"
+        r"\pgfplotsset{compat=1.18}" "\n"
+        r"\usetikzlibrary{patterns}" "\n"
+        "\n"
+        r"\pgfdeclarelayer{background}" "\n"
+        r"\pgfsetlayers{background,main}" "\n"
+        "\n"
+        + define_colors
+        + "\n"
+        r"\pgfplotsset{" "\n"
+        r"    legend image code/.code={" "\n"
+        r"        \draw[#1, draw=black!60, line width=0.3pt]" "\n"
+        r"            (0pt,-1pt) rectangle (5pt,4pt);" "\n"
+        r"    }," "\n"
+        r"}" "\n"
+        "\n"
+        r"\begin{document}" "\n"
+        r"\begin{tikzpicture}" "\n"
+        r"\begin{axis}[" "\n"
+        r"    ybar stacked," "\n"
+        r"    bar width       = 4.5pt," "\n"
+        r"    width           = 0.54\linewidth, height = 3cm, scale only axis," "\n"
+        r"    enlarge x limits= 0.03," "\n"
+        r"    clip            = false," "\n"
+        f"    symbolic x coords = {{{sym_coords}}},\n"
+        r"    xtick           = data," "\n"
+        f"    xticklabels     = {{{xticklabels}}},\n"
+        r"    tick align      = outside," + "\n"
+        r"    minor tick length = 3pt," "\n"
+        r"    x tick label style = {rotate=90, anchor=east, font=\scriptsize}," "\n"
+        r"    ymin            = 0," "\n"
+        r"    ymax            = 100," "\n"
+        r"    ytick           = {0, 20, 40, 60, 80, 100}," "\n"
+        r"    yticklabel      = {\pgfmathprintnumber{\tick}\%}," "\n"
+        f"    ylabel          = {{{ylabel}}}," "\n"
+        r"    ylabel style    = {font=\scriptsize}," "\n"
+        r"    ymajorgrids     = true," "\n"
+        r"    grid style      = {dashed, gray!30}," "\n"
+        r"    axis line style = {gray!60}," "\n"
+        r"    tick style      = {gray!60}," "\n"
+        r"    legend style    = {" "\n"
+        r"        at={(0.5,1.05)}, anchor=south," "\n"
+        r"        font=\scriptsize," "\n"
+        r"        cells={anchor=west}," "\n"
+        r"        draw=none," "\n"
+        r"        /tikz/every even column/.append style={column sep=6pt}," "\n"
+        r"    }," "\n"
+        r"    legend columns  = -1," "\n"
+        r"    tick label style= {font=\scriptsize}," "\n"
+        r"    after end axis/.code={" "\n"
+        r"        \begin{pgfonlayer}{background}" "\n"
+        r"            \fill[gray!60] ([xshift=-4.8pt]{axis cs:Mean,\pgfkeysvalueof{/pgfplots/ymin}}) rectangle (rel axis cs:1,1);" "\n"
+        r"        \end{pgfonlayer}" "\n"
+        r"    }," "\n"
+        r"]" "\n"
+        "\n"
+        + addplot_str
+        + "\n"
+        "\n"
+        r"\end{axis}" "\n"
+        r"\end{tikzpicture}" "\n"
+        r"\end{document}" "\n"
+    )
+
+    with open(output_path, "w") as f:
+        f.write(tex)
+    print(f"Saved {output_path}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Plot register read-before-overwrite distribution.",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=None,
+        help="Root directory to search for stats.txt",
+    )
+    parser.add_argument(
+        "--impl",
+        choices=["baseline", "sereno"],
+        default="sereno",
+        help="Implementation subdirectory under big_core/ (default: sereno)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["committed", "wrong_path"],
+        default="committed",
+        help="Stat set to plot: committed-path only or including wrong-path reads",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output .tex file path",
+    )
+    parser.add_argument(
+        "--debug",
+        metavar="BENCHMARK",
+        default="",
+        help="Print per-simpoint raw counts for this benchmark (e.g. 600.perlbench_s)",
+    )
+    args = parser.parse_args()
+
+    keys = stat_keys(args.mode)
+    data_dir = (args.data_dir or (BIG_CORE_DIR / args.impl / "4.0x/width8")).resolve()
+    default_out = (
+        "reg_reads_before_overwrite.tex"
+        if args.mode == "committed"
+        else "reg_reads_before_overwrite_wrong_path.tex"
+    )
+    output_tex = (
+        args.output or (BIG_CORE_DIR / args.impl / "4.0x/graphs" / default_out)
+    ).resolve()
+    ylabel = (
+        "Fraction of Register Lifetimes"
+        if args.mode == "committed"
+        else "Fraction of Register Lifetimes (incl. wrong path)"
+    )
+
+    print(f"Collecting {args.mode} register read-lifetime stats from {data_dir} ...")
+    if args.debug:
+        print(f"DEBUG mode: showing all numbers for '{args.debug}'\n")
+    data = collect_data(data_dir, keys, debug_bm=args.debug)
+    if not data:
+        print("No data found – nothing to plot.")
+        return
+
+    benchmarks = sorted(data.keys())
+    print(f"\nFound {len(benchmarks)} benchmarks:")
+    header = f"{'Benchmark':<30}" + "".join(f"{c:>12}" for c in ["0 (%)", "1 (%)", "2 (%)", "3+ (%)"])
+    print(header)
+    print("-" * len(header))
+    for bm in benchmarks:
+        pct = to_percentages(data[bm], keys)
+        row = f"{bm:<30}" + "".join(f"{v:>11.2f}%" for v in pct)
+        print(row)
+
+    bm_totals_m = [sum(data[bm].get(k, 0.0) for k in keys) for bm in benchmarks]
+    grand_total_m = sum(bm_totals_m)
+    bm_weights_m = (
+        [t / grand_total_m for t in bm_totals_m]
+        if grand_total_m > 0
+        else [1.0 / len(benchmarks)] * len(benchmarks)
+    )
+    weighted_cat_m = [
+        sum(bm_weights_m[j] * data[benchmarks[j]].get(keys[i], 0.0) for j in range(len(benchmarks)))
+        for i in range(len(keys))
+    ]
+    total_wc_m = sum(weighted_cat_m)
+    means = (
+        [100.0 * c / total_wc_m for c in weighted_cat_m]
+        if total_wc_m > 0
+        else [0.0] * len(keys)
+    )
+    print("-" * len(header))
+    print(f"{'Mean':<30}" + "".join(f"{v:>11.2f}%" for v in means))
+
+    generate_tikz(data, output_tex, keys, ylabel)
+
+
+if __name__ == "__main__":
+    main()

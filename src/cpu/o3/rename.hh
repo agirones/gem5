@@ -43,7 +43,9 @@
 #define __CPU_O3_RENAME_HH__
 
 #include <list>
+#include <map>
 #include <utility>
+#include <vector>
 
 #include "base/statistics.hh"
 #include "cpu/o3/comm.hh"
@@ -254,6 +256,25 @@ class Rename
     /** Renames the destination registers of an instruction. */
     void renameDestRegs(const DynInstPtr &inst, ThreadID tid);
 
+    /** Returns true if this register class participates in read-lifetime stats. */
+    bool countsRegister(RegClassType type) const;
+
+    /** Records a committed-path lifetime sample. */
+    void recordLifetimeEndCommitted(unsigned read_count);
+
+    /** Records a speculative lifetime sample (includes wrong-path reads). */
+    void recordLifetimeEndSpeculative(unsigned read_count);
+
+    /** Counts committed rename-time reads of a phys reg at lifetime end. */
+    unsigned countCommittedReadsToPhysReg(PhysRegIdPtr prev_reg,
+                                          InstSeqNum writer_seq_num) const;
+
+    /** Drops pending source reads for squashed instructions. */
+    void undoSquashedInstPendingSrcReads(const InstSeqNum &squash_seq_num);
+
+    /** Drops pending source reads for committed instructions. */
+    void cleanupCommittedInstPendingSrcReads(InstSeqNum commit_seq_num);
+
     /** Calculates the number of free ROB entries for a specific thread. */
     int calcFreeROBEntries(ThreadID tid);
 
@@ -462,6 +483,15 @@ class Rename
     /** The maximum skid buffer size. */
     unsigned skidBufferMax;
 
+    /** Total number of physical registers in the machine. */
+    unsigned numPhysRegs;
+
+    /** All rename-time reads per physical register (includes wrong path). */
+    std::vector<unsigned> physRegReadCountsSpec;
+
+    /** Pending rename-time source reads, keyed by producer sequence number. */
+    std::map<InstSeqNum, std::vector<unsigned>> instPendingSrcReads;
+
     /** Enum to record the source of a structure full stall.  Can come from
      * either ROB, IQ, LSQ, and it is priortized in that order.
      */
@@ -544,6 +574,10 @@ class Rename
         statistics::Scalar LQFullCycles;
         /** Stat for the total number of cycles rename has blocked due to SQ full. */
         statistics::Scalar SQFullCycles;
+        /** Reads before overwrite, counting only committed instructions. */
+        statistics::Vector readsBeforeOverwrite;
+        /** Reads before overwrite, including wrong-path rename-time reads. */
+        statistics::Vector readsBeforeOverwriteWrongPath;
     } stats;
 };
 

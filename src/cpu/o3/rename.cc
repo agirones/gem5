@@ -72,6 +72,17 @@ Rename::Rename(CPU *_cpu, const BaseO3CPUParams &params)
              "\tincrease MaxWidth in src/cpu/o3/limits.hh\n",
              renameWidth, static_cast<int>(MaxWidth));
 
+    const auto &reg_classes = params.isa[0]->regClasses();
+    numPhysRegs = params.numPhysIntRegs + params.numPhysFloatRegs +
+        params.numPhysVecRegs +
+        params.numPhysVecRegs * (
+            reg_classes.at(VecElemClass)->numRegs() /
+            reg_classes.at(VecRegClass)->numRegs()) +
+        params.numPhysVecPredRegs +
+        params.numPhysMatRegs +
+        params.numPhysCCRegs;
+    physRegReadCountsSpec.assign(numPhysRegs, 0);
+
     // @todo: Make into a parameter.
     skidBufferMax = (decodeToRenameDelay + 1) * params.decodeWidth;
     for (uint32_t tid = 0; tid < MaxThreads; tid++) {
@@ -153,7 +164,13 @@ Rename::RenameStats::RenameStats(statistics::Group *parent)
       ADD_STAT(LQFullCycles, statistics::units::Count::get(),
                "Number of cycles rename has blocked due to LQ full" ),
       ADD_STAT(SQFullCycles, statistics::units::Count::get(),
-               "Number of cycles rename has blocked due to SQ full")
+               "Number of cycles rename has blocked due to SQ full"),
+      ADD_STAT(readsBeforeOverwrite, statistics::units::Count::get(),
+               "Histogram of committed rename-time reads before a register "
+               "value is overwritten"),
+      ADD_STAT(readsBeforeOverwriteWrongPath, statistics::units::Count::get(),
+               "Histogram of all rename-time reads before a register value is "
+               "overwritten, including wrong-path instructions")
 {
     squashCycles.prereq(squashCycles);
     idleCycles.prereq(idleCycles);
@@ -189,6 +206,97 @@ Rename::RenameStats::RenameStats(statistics::Group *parent)
     IQFullCycles.prereq(IQFullCycles);
     LQFullCycles.prereq(LQFullCycles);
     SQFullCycles.prereq(SQFullCycles);
+
+    readsBeforeOverwrite
+        .init(4)
+        .subname(0, "0")
+        .subname(1, "1")
+        .subname(2, "2")
+        .subname(3, "3_or_more")
+        .flags(statistics::total | statistics::pdf);
+
+    readsBeforeOverwriteWrongPath
+        .init(4)
+        .subname(0, "0")
+        .subname(1, "1")
+        .subname(2, "2")
+        .subname(3, "3_or_more")
+        .flags(statistics::total | statistics::pdf);
+}
+
+bool
+Rename::countsRegister(RegClassType type) const
+{
+    return type != InvalidRegClass && type != CCRegClass &&
+        type != MiscRegClass;
+}
+
+void
+Rename::recordLifetimeEndCommitted(unsigned read_count)
+{
+    if (read_count >= 3) {
+        stats.readsBeforeOverwrite[3]++;
+    } else {
+        stats.readsBeforeOverwrite[read_count]++;
+    }
+}
+
+void
+Rename::recordLifetimeEndSpeculative(unsigned read_count)
+{
+    if (read_count >= 3) {
+        stats.readsBeforeOverwriteWrongPath[3]++;
+    } else {
+        stats.readsBeforeOverwriteWrongPath[read_count]++;
+    }
+}
+
+unsigned
+Rename::countCommittedReadsToPhysReg(PhysRegIdPtr prev_reg,
+                                       InstSeqNum writer_seq_num) const
+{
+    unsigned count = 0;
+    const unsigned flat_idx = prev_reg->flatIndex();
+
+    for (const auto &entry : instPendingSrcReads) {
+        if (entry.first > writer_seq_num) {
+            continue;
+        }
+
+        for (unsigned pending_flat_idx : entry.second) {
+            if (pending_flat_idx == flat_idx) {
+                count++;
+            }
+        }
+    }
+
+    return count;
+}
+
+void
+Rename::cleanupCommittedInstPendingSrcReads(InstSeqNum commit_seq_num)
+{
+    for (auto it = instPendingSrcReads.begin();
+            it != instPendingSrcReads.end(); ) {
+        if (it->first <= commit_seq_num) {
+            it = instPendingSrcReads.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void
+Rename::undoSquashedInstPendingSrcReads(const InstSeqNum &squash_seq_num)
+{
+    for (auto it = instPendingSrcReads.begin();
+            it != instPendingSrcReads.end(); ) {
+        if (it->first > squash_seq_num) {
+            it = instPendingSrcReads.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void
@@ -927,6 +1035,8 @@ Rename::unblock(ThreadID tid)
 void
 Rename::doSquash(const InstSeqNum &squashed_seq_num, ThreadID tid)
 {
+    undoSquashedInstPendingSrcReads(squashed_seq_num);
+
     auto hb_it = historyBuffer[tid].begin();
 
     // After a syscall squashes everything, the history buffer may be empty
@@ -979,46 +1089,53 @@ Rename::removeFromHistory(InstSeqNum inst_seq_num, ThreadID tid)
             "history buffer %u (size=%i), until [sn:%llu].\n",
             tid, tid, historyBuffer[tid].size(), inst_seq_num);
 
-    auto hb_it = historyBuffer[tid].end();
+    if (!historyBuffer[tid].empty()) {
+        auto hb_it = historyBuffer[tid].end();
 
-    --hb_it;
+        --hb_it;
 
-    if (historyBuffer[tid].empty()) {
-        DPRINTF(Rename, "[tid:%i] History buffer is empty.\n", tid);
-        return;
-    } else if (hb_it->instSeqNum > inst_seq_num) {
-        DPRINTF(Rename, "[tid:%i] [sn:%llu] "
-                "Old sequence number encountered. "
-                "Ensure that a syscall happened recently.\n",
-                tid,inst_seq_num);
-        return;
-    }
+        if (hb_it->instSeqNum <= inst_seq_num) {
+            // Commit all the renames up until (and including) the committed
+            // sequence number. Some or even all of the committed instructions
+            // may not have rename histories if they did not have destination
+            // registers that were renamed.
+            while (!historyBuffer[tid].empty() &&
+                   hb_it != historyBuffer[tid].end() &&
+                   hb_it->instSeqNum <= inst_seq_num) {
 
-    // Commit all the renames up until (and including) the committed sequence
-    // number. Some or even all of the committed instructions may not have
-    // rename histories if they did not have destination registers that were
-    // renamed.
-    while (!historyBuffer[tid].empty() &&
-           hb_it != historyBuffer[tid].end() &&
-           hb_it->instSeqNum <= inst_seq_num) {
+                DPRINTF(Rename, "[tid:%i] Freeing up older rename of reg %i "
+                        "(%s), [sn:%llu].\n",
+                        tid, hb_it->prevPhysReg->index(),
+                        hb_it->prevPhysReg->className(),
+                        hb_it->instSeqNum);
 
-        DPRINTF(Rename, "[tid:%i] Freeing up older rename of reg %i (%s), "
-                "[sn:%llu].\n",
-                tid, hb_it->prevPhysReg->index(),
-                hb_it->prevPhysReg->className(),
-                hb_it->instSeqNum);
+                // Don't free special phys regs like misc and zero regs, which
+                // can be recognized because the new mapping is the same as
+                // the old one.
+                if (hb_it->newPhysReg != hb_it->prevPhysReg) {
+                    if (countsRegister(hb_it->archReg.classValue()) &&
+                            !hb_it->prevPhysReg->isFixedMapping()) {
+                        recordLifetimeEndCommitted(countCommittedReadsToPhysReg(
+                            hb_it->prevPhysReg, hb_it->instSeqNum));
+                    }
+                    freeList->addReg(hb_it->prevPhysReg);
+                }
 
-        // Don't free special phys regs like misc and zero regs, which
-        // can be recognized because the new mapping is the same as
-        // the old one.
-        if (hb_it->newPhysReg != hb_it->prevPhysReg) {
-            freeList->addReg(hb_it->prevPhysReg);
+                ++stats.committedMaps;
+
+                historyBuffer[tid].erase(hb_it--);
+            }
+        } else {
+            DPRINTF(Rename, "[tid:%i] [sn:%llu] "
+                    "Old sequence number encountered. "
+                    "Ensure that a syscall happened recently.\n",
+                    tid, inst_seq_num);
         }
-
-        ++stats.committedMaps;
-
-        historyBuffer[tid].erase(hb_it--);
+    } else {
+        DPRINTF(Rename, "[tid:%i] History buffer is empty.\n", tid);
     }
+
+    cleanupCommittedInstPendingSrcReads(inst_seq_num);
 }
 
 void
@@ -1073,6 +1190,13 @@ Rename::renameSrcRegs(const DynInstPtr &inst, ThreadID tid)
 
         inst->renameSrcReg(src_idx, renamed_reg);
 
+        if (countsRegister(flat_reg.classValue()) &&
+                !renamed_reg->isFixedMapping()) {
+            const unsigned flat_idx = renamed_reg->flatIndex();
+            instPendingSrcReads[inst->seqNum].push_back(flat_idx);
+            physRegReadCountsSpec[flat_idx]++;
+        }
+
         // See if the register is ready or not.
         if (scoreboard->getReg(renamed_reg)) {
             DPRINTF(Rename,
@@ -1115,6 +1239,17 @@ Rename::renameDestRegs(const DynInstPtr &inst, ThreadID tid)
         inst->flattenedDestIdx(dest_idx, flat_dest_regid);
 
         scoreboard->unsetReg(rename_result.first);
+
+        if (rename_result.first != rename_result.second &&
+                countsRegister(flat_dest_regid.classValue()) &&
+                !rename_result.second->isFixedMapping()) {
+            recordLifetimeEndSpeculative(
+                physRegReadCountsSpec[rename_result.second->flatIndex()]);
+        }
+
+        if (rename_result.first != rename_result.second) {
+            physRegReadCountsSpec[rename_result.first->flatIndex()] = 0;
+        }
 
         DPRINTF(Rename,
                 "[tid:%i] "
