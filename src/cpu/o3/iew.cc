@@ -331,7 +331,7 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
 
     unsigned totalIQEntries = 0;
     for (const auto &iq : params.instQueues)
-        totalIQEntries += iq->numEntries;
+        totalIQEntries += iq->numEntries();
 
     dispatchedNumSrcOperands
         .init(0, 8, 1)
@@ -367,19 +367,19 @@ IEW::IEWStats::IEWStats(CPU *cpu, const BaseO3CPUParams &params)
         .flags(statistics::pdf);
 
     wakeupHasDestRegsHist
-        .init(0,params.numIQEntries,1)
+        .init(0, totalIQEntries, 1)
         .flags(statistics::pdf);
 
     iqOccupancyHist
-        .init(0,params.numIQEntries,1)
+        .init(0, totalIQEntries, 1)
         .flags(statistics::pdf);
 
     wakeupHasIQConsumersHist
-        .init(0,params.numIQEntries,1)
+        .init(0, totalIQEntries, 1)
         .flags(statistics::pdf);
 
     nonReadyInIQHist
-        .init(0,params.numIQEntries * 8,1)
+        .init(0, totalIQEntries * 8, 1)
         .flags(statistics::pdf);
 
     noWakeupInstType
