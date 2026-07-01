@@ -77,6 +77,9 @@ class PerfKvmCounterConfig
     PerfKvmCounterConfig(uint32_t type, uint64_t config);
     ~PerfKvmCounterConfig();
 
+    /** Number of data pages in the perf sample ring buffer (power of 2). */
+    uint32_t mmapDataPages = 1;
+
     /**
      * Set the initial sample period (overflow count) of an event. If
      * this is set to 0, the event acts as a normal counting event and
@@ -158,6 +161,37 @@ class PerfKvmCounterConfig
      */
     PerfKvmCounterConfig &exclude_hv(bool val) {
         attr.exclude_hv = val;
+        return *this;
+    }
+
+    /**
+     * Exclude guest kernel events (count user-mode instructions only).
+     *
+     * Used for SimPoint fast-forward so KVM inst stops match guest
+     * perf BBV collection (exclude_kernel in perf_event_open).
+     */
+    PerfKvmCounterConfig &exclude_kernel(bool val) {
+        attr.exclude_kernel = val;
+        return *this;
+    }
+
+    /**
+     * Configure counter as an IP sampler for BBV collection.
+     */
+    PerfKvmCounterConfig &ipSampling(uint64_t period) {
+        attr.freq = 0;
+        attr.sample_period = period;
+        attr.sample_type = PERF_SAMPLE_IP;
+        attr.wakeup_events = 1;
+        attr.mmap = 1;
+        return *this;
+    }
+
+    /**
+     * Set the number of data pages in the perf sample ring buffer.
+     */
+    PerfKvmCounterConfig &ringDataPages(uint32_t pages) {
+        mmapDataPages = pages;
         return *this;
     }
 
@@ -284,6 +318,15 @@ public:
     uint64_t read() const;
 
     /**
+     * Drain IP samples from the mmap ring buffer.
+     */
+    template <typename Handler>
+    void drainIpSamples(Handler &&handler);
+
+    /** True if the sample ring buffer has unread records. */
+    bool hasPendingSamples() const;
+
+    /**
      * Enable signal delivery to a thread on counter overflow.
      *
      * @param tid Thread to deliver signal to
@@ -376,10 +419,45 @@ private:
     struct perf_event_mmap_page *ringBuffer;
     /** Total number of pages in ring buffer */
     int ringNumPages;
-
     /** Cached host page size */
     long pageSize;
 };
+
+template <typename Handler>
+void
+PerfKvmCounter::drainIpSamples(Handler &&handler)
+{
+    if (!ringBuffer)
+        return;
+
+    struct perf_event_mmap_page *header = ringBuffer;
+    uint64_t head = header->data_head;
+    __sync_synchronize();
+    uint64_t tail = header->data_tail;
+
+    char *data = reinterpret_cast<char *>(ringBuffer) + header->data_offset;
+    const size_t data_size = header->data_size;
+    while (tail != head) {
+        auto *eh = reinterpret_cast<struct perf_event_header *>(
+            data + (tail % data_size));
+        if (eh->type == PERF_RECORD_SAMPLE) {
+            char *p = reinterpret_cast<char *>(eh + 1);
+            uint64_t ip = *reinterpret_cast<uint64_t *>(p);
+            handler(ip);
+        }
+        tail += eh->size;
+    }
+    __sync_synchronize();
+    header->data_tail = tail;
+}
+
+inline bool
+PerfKvmCounter::hasPendingSamples() const
+{
+    if (!ringBuffer)
+        return false;
+    return ringBuffer->data_head != ringBuffer->data_tail;
+}
 
 } // namespace gem5
 

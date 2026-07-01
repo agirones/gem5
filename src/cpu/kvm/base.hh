@@ -43,9 +43,11 @@
 #include <csignal>
 #include <memory>
 #include <queue>
+#include <string>
 
 #include "base/statistics.hh"
 #include "cpu/kvm/perfevent.hh"
+#include "cpu/kvm/bbv_collector.hh"
 #include "cpu/kvm/timer.hh"
 #include "cpu/kvm/vm.hh"
 #include "cpu/base.hh"
@@ -128,6 +130,15 @@ class BaseKvmCPU : public BaseCPU
 
     /** Dump the internal state to the terminal. */
     virtual void dump() const;
+
+    /** Start host-side SimPoint BBV collection (KVM perf IP sampling). */
+    void startBbvCollection();
+
+    /** Stop host-side BBV collection and flush the output file. */
+    void stopBbvCollection();
+
+    /** True while host-side BBV collection is active. */
+    bool bbvCollecting() const;
 
     /**
      * Force an exit from KVM.
@@ -656,6 +667,9 @@ class BaseKvmCPU : public BaseCPU
     /** True if using perf; False otherwise*/
     bool usePerf;
 
+    /** Exclude guest kernel from perf instruction counting when true. */
+    bool perfExcludeKernel;
+
     /** KVM internal ID of the vCPU */
     long vcpuID;
 
@@ -755,6 +769,9 @@ class BaseKvmCPU : public BaseCPU
      */
     void setupInstCounter(uint64_t period = 0);
 
+    /** Host-side SimPoint BBV collector (optional). */
+    void tickBbv(uint64_t instsExecuted);
+
     /** Currently active instruction count breakpoint */
     uint64_t activeInstPeriod;
 
@@ -780,6 +797,13 @@ class BaseKvmCPU : public BaseCPU
      * @see scheduleInstStop
      */
     std::unique_ptr<PerfKvmCounter> hwInstructions;
+
+    /** Optional host-side BBV collector for SimPoint fast-forward. */
+    const bool collectBbv;
+    const std::string bbvOutPath;
+    const uint64_t bbvInterval;
+    const uint64_t bbvSamplePeriod;
+    std::unique_ptr<BbvCollector> bbvCollector;
 
     /**
      * Does the runTimer control the performance counters?

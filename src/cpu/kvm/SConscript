@@ -52,6 +52,7 @@ SimObject(
 )
 
 Source('base.cc', tags=['kvm'])
+Source('bbv_collector.cc', tags=['kvm'])
 Source('device.cc', tags=['kvm'])
 Source('vm.cc', tags=['kvm'])
 Source('perfevent.cc', tags=['kvm'])

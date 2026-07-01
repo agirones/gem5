@@ -51,6 +51,21 @@ class BaseKvmCPU(BaseCPU):
         """Dump the internal state of KVM to standard out."""
         pass
 
+    @cxxMethod
+    def startBbvCollection(self):
+        """Start host-side SimPoint BBV collection."""
+        pass
+
+    @cxxMethod
+    def stopBbvCollection(self):
+        """Stop host-side BBV collection and flush output."""
+        pass
+
+    @cxxMethod
+    def bbvCollecting(self):
+        """Return True while host-side BBV collection is active."""
+        pass
+
     @classmethod
     def memory_mode(cls):
         return "atomic_noncaching"
@@ -67,6 +82,27 @@ class BaseKvmCPU(BaseCPU):
         True,
         "Use perf for gathering statistics from the guest and providing "
         "statistic-related functionalities",
+    )
+    perfExcludeKernel = Param.Bool(
+        True,
+        "Exclude guest kernel instructions from the perf instruction "
+        "counter (user-mode only). Match guest perf_bbv SimPoint collection.",
+    )
+    collectBbv = Param.Bool(
+        False,
+        "Collect SimPoint BBVs on the host using KVM perf IP sampling.",
+    )
+    bbvOutPath = Param.String(
+        "",
+        "Host path for uncompressed SimPoint G-format BBV output.",
+    )
+    bbvInterval = Param.UInt64(
+        10000000,
+        "BBV interval size in user-mode instructions.",
+    )
+    bbvSamplePeriod = Param.UInt64(
+        4096,
+        "Perf IP sample period for host BBV collection.",
     )
     useCoalescedMMIO = Param.Bool(False, "Use coalesced MMIO (EXPERIMENTAL)")
     usePerfOverflow = Param.Bool(

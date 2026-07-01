@@ -72,6 +72,7 @@ BaseKvmCPU::BaseKvmCPU(const BaseKvmCPUParams &params)
       threadContextDirty(true),
       kvmStateDirty(false),
       usePerf(params.usePerf),
+      perfExcludeKernel(params.perfExcludeKernel),
       vcpuID(-1), vcpuFD(-1), vcpuMMapSize(0),
       _kvmRun(NULL), mmioRing(NULL),
       pageSize(sysconf(_SC_PAGE_SIZE)),
@@ -80,6 +81,11 @@ BaseKvmCPU::BaseKvmCPU(const BaseKvmCPUParams &params)
       activeInstPeriod(0),
       hwCycles(nullptr),
       hwInstructions(nullptr),
+      collectBbv(params.collectBbv),
+      bbvOutPath(params.bbvOutPath),
+      bbvInterval(params.bbvInterval),
+      bbvSamplePeriod(params.bbvSamplePeriod),
+      bbvCollector(collectBbv ? std::make_unique<BbvCollector>() : nullptr),
       perfControlledByTimer(params.usePerfOverflow),
       hostFactor(params.hostFactor), stats(this),
       ctrInsts(0)
@@ -119,6 +125,8 @@ BaseKvmCPU::BaseKvmCPU(const BaseKvmCPUParams &params)
 
 BaseKvmCPU::~BaseKvmCPU()
 {
+    if (bbvCollector)
+        bbvCollector->stop();
     if (_kvmRun)
         munmap(_kvmRun, vcpuMMapSize);
     close(vcpuFD);
@@ -810,6 +818,8 @@ BaseKvmCPU::kvmRun(Tick ticks)
         baseStats.numInsts += instsExecuted;
         ctrInsts += instsExecuted;
 
+        tickBbv(instsExecuted);
+
         const ThreadID tid = thread->threadId();
         const bool in_user_mode = thread->getIsaPtr()->inUserMode();
         commitStats[tid]->numInsts += instsExecuted;
@@ -1370,6 +1380,9 @@ BaseKvmCPU::ioctlRun()
 void
 BaseKvmCPU::setupInstStop()
 {
+    if (bbvCollecting())
+        return;
+
     if (thread->comInstEventQueue.empty()) {
         setupInstCounter(0);
     } else {
@@ -1382,6 +1395,9 @@ BaseKvmCPU::setupInstStop()
 void
 BaseKvmCPU::setupInstCounter(uint64_t period)
 {
+    if (bbvCollecting())
+        return;
+
     // This function is for setting up instruction counter using perf
     if (!usePerf) {
         return;
@@ -1401,6 +1417,8 @@ BaseKvmCPU::setupInstCounter(uint64_t period)
     // different APIs in the kernel.
     cfgInstructions.exclude_hv(true)
         .exclude_host(true);
+    if (perfExcludeKernel)
+        cfgInstructions.exclude_kernel(true);
 
     if (period) {
         // Setup a sampling counter if that has been requested.
@@ -1421,6 +1439,53 @@ BaseKvmCPU::setupInstCounter(uint64_t period)
         hwInstructions->enableSignals(KVM_KICK_SIGNAL);
 
     activeInstPeriod = period;
+}
+
+void
+BaseKvmCPU::startBbvCollection()
+{
+    if (!collectBbv || !bbvCollector)
+        panic("KVM: startBbvCollection() called without collectBbv enabled\n");
+    if (!usePerf || !hwCycles || !hwCycles->attached())
+        panic("KVM: BBV collection requires perf counters to be attached\n");
+    if (bbvOutPath.empty())
+        panic("KVM: BBV collection enabled but bbvOutPath is empty\n");
+
+    bbvCollector->start(bbvOutPath, bbvInterval, bbvSamplePeriod,
+                        perfExcludeKernel);
+    bbvCollector->setInsnBaseline(hwInstructions->read());
+    inform("Host BBV: collection started at KVM inst offset %llu\n",
+           hwInstructions->read());
+    DPRINTF(Kvm, "Started host BBV collection -> %s\n", bbvOutPath);
+}
+
+void
+BaseKvmCPU::stopBbvCollection()
+{
+    if (!bbvCollector || !bbvCollector->active())
+        return;
+
+    if (usePerf)
+        bbvCollector->accumulate(0, hwInstructions->read());
+    bbvCollector->stop();
+    inform("Host BBV: collection stopped\n");
+    DPRINTF(Kvm, "Stopped host BBV collection\n");
+}
+
+bool
+BaseKvmCPU::bbvCollecting() const
+{
+    return bbvCollector && bbvCollector->active();
+}
+
+void
+BaseKvmCPU::tickBbv(uint64_t instsExecuted)
+{
+    if (!bbvCollector || !bbvCollector->active() || !usePerf)
+        return;
+
+    const uint64_t total_insn_count = hwInstructions->read();
+    bbvCollector->accumulate(instsExecuted, total_insn_count);
 }
 
 } // namespace gem5

@@ -191,7 +191,7 @@ PerfKvmCounter::attach(PerfKvmCounterConfig &config,
         panic("PerfKvmCounter::attach failed (%i)\n", errno);
     }
 
-    mmapPerf(1);
+    mmapPerf(config.mmapDataPages);
 }
 
 pid_t
