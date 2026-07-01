@@ -28,6 +28,13 @@ parser.add_argument(
     help="The directory to store the checkpoint.",
 )
 
+parser.add_argument(
+    "--warmup-interval",
+    type=int,
+    default=50000000,
+    help="Instructions of warmup before each simpoint ROI; checkpoint is taken at warmup start.",
+)
+
 args = parser.parse_args()
 
 cache_hierarchy = NoCache()
@@ -45,9 +52,19 @@ board = SimpleBoard(
 binary_path = "/home/andreug/research/microbenchmarks/spec2017/cpu2017/benchspec/CPU/600.perlbench_s/run/run_base_refspeed_arm-build-64.0000/perlbench_s_base.arm-build-64"
 benchmark_binary = BinaryResource(local_path=binary_path)
 
-checkspam_pl_file = "/home/andreug/research/microbenchmarks/spec2017/cpu2017/benchspec/CPU/600.perlbench_s/run/run_base_refspeed_arm-build-64.0000/checkspam.pl"
-lib_path = "/home/andreug/research/microbenchmarks/spec2017/cpu2017/benchspec/CPU/600.perlbench_s/run/run_base_refspeed_arm-build-64.0000/lib"
-benchmark_arguments = [f"-I{lib_path}", checkspam_pl_file, 2500, 5, 25, 11, 150, 1, 1, 1, 1]
+benchmark_arguments = [
+    '-I/home/andreug/research/microbenchmarks/spec2017/cpu2017/benchspec/CPU/600.perlbench_s/run/run_base_refspeed_arm-build-64.0000/lib',
+    '/home/andreug/research/microbenchmarks/spec2017/cpu2017/benchspec/CPU/600.perlbench_s/run/run_base_refspeed_arm-build-64.0000/checkspam.pl',
+    2500,
+    5,
+    25,
+    11,
+    150,
+    1,
+    1,
+    1,
+    1,
+]
 
 simpoint_list = [
     97868,
@@ -88,7 +105,7 @@ board.set_se_simpoint_workload(
         simpoint_interval=10000000,
         simpoint_list=simpoint_list,
         weight_list=simpoint_weights,
-        warmup_interval=10000000,
+        warmup_interval=args.warmup_interval,
     ),
 )
 

@@ -28,6 +28,13 @@ parser.add_argument(
     help="The directory to store the checkpoint.",
 )
 
+parser.add_argument(
+    "--warmup-interval",
+    type=int,
+    default=50000000,
+    help="Instructions of warmup before each simpoint ROI; checkpoint is taken at warmup start.",
+)
+
 args = parser.parse_args()
 
 cache_hierarchy = NoCache()
@@ -92,7 +99,7 @@ board.set_se_simpoint_workload(
         simpoint_interval=10000000,
         simpoint_list=simpoint_list,
         weight_list=simpoint_weights,
-        warmup_interval=10000000,
+        warmup_interval=args.warmup_interval,
     ),
 )
 

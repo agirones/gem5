@@ -85,6 +85,8 @@ class ExitEvent(Enum):
             return ExitEvent.WORKEND
         elif exit_string == "m5_exit instruction encountered":
             return ExitEvent.EXIT
+        elif exit_string == "m5_hypercall instruction encountered":
+            return ExitEvent.EXIT
         elif exit_string == "exiting with last active thread context":
             return ExitEvent.EXIT
         elif exit_string == "simulate() limit reached":
